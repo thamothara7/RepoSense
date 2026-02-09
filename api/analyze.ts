@@ -19,7 +19,7 @@ export default async function handler(request: Request) {
     if (!apiKey) {
       return new Response(JSON.stringify({ error: 'Server misconfiguration: API_KEY missing' }), { 
         status: 500,
-        headers: { 'Content-Type': 'application/json' }
+        headers: { 'Content-Type': 'application/json' } 
       });
     }
 
@@ -31,18 +31,14 @@ export default async function handler(request: Request) {
     const modelName = deepReasoning ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
     
     // Configure Thinking Budget
-    // Flash: 0 (Disable thinking for max speed) unless needed? Actually Flash supports thinking, 
-    // but for "Instant" feel, we keep it low or disabled.
+    // Flash: Explicitly set to 0 to disable thinking and ensure fast time-to-first-token.
     // Pro: 8192 for deep analysis.
     const thinkingBudget = deepReasoning ? 8192 : 0;
 
     const genAIConfig: any = {
       systemInstruction: systemInstruction,
+      thinkingConfig: { thinkingBudget }
     };
-
-    if (deepReasoning) {
-        genAIConfig.thinkingConfig = { thinkingBudget };
-    }
 
     const stream = new ReadableStream({
       async start(controller) {
@@ -53,8 +49,8 @@ export default async function handler(request: Request) {
             config: genAIConfig
           });
 
-          for await (const chunk of result.stream) {
-            const text = chunk.text();
+          for await (const chunk of result) {
+            const text = chunk.text;
             if (text) {
               controller.enqueue(new TextEncoder().encode(text));
             }
@@ -62,9 +58,9 @@ export default async function handler(request: Request) {
           controller.close();
         } catch (error: any) {
           console.error("Streaming Error:", error);
-          // Send a JSON error object in the stream if possible, or just close with error
-          // Since we already started streaming text, we can't cleanly switch to JSON error.
-          // We will log it.
+          // If we haven't sent any data yet, we might be able to send a JSON error,
+          // but since we are in a stream, it's safer to just close or log.
+          // In a real app, we might send a specific error string chunk.
           controller.error(error);
         }
       },

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GithubIcon, SearchIcon, Activity, AlertTriangle, Layers, Zap, Cpu, Shield, Layout, RepoSenseLogo, Sun, Moon, Settings, Key, X } from './components/Icons';
+import { GithubIcon, SearchIcon, Activity, AlertTriangle, Layers, Zap, Cpu, Shield, Layout, RepoSenseLogo, Sun, Moon, Settings, Key, X, Check, FileCode } from './components/Icons';
 import { SectionCard } from './components/SectionCard';
 import { ArchitectureView } from './components/ArchitectureView';
 import { MetaStats } from './components/MetaStats';
@@ -16,11 +16,20 @@ const EXAMPLE_REPOS = [
   "fastapi/fastapi"
 ];
 
+// Progress Steps Configuration
+const LOADING_STEPS = [
+  { id: 'scan', label: 'Scanning Repository', icon: GithubIcon },
+  { id: 'context', label: 'Extracting Context', icon: FileCode },
+  { id: 'reasoning', label: 'System Reasoning', icon: Cpu },
+  { id: 'generation', label: 'Report Generation', icon: Zap },
+];
+
 const App: React.FC = () => {
   const [url, setUrl] = useState('');
   const [mode, setMode] = useState<AnalysisMode>('full');
   const [deepReasoning, setDeepReasoning] = useState(false);
   const [state, setState] = useState<AnalysisState>({ status: 'idle', message: '' });
+  const [currentStep, setCurrentStep] = useState(0);
   
   // Theme management
   const [theme, setTheme] = useState<'dark' | 'light'>(() => {
@@ -70,20 +79,28 @@ const App: React.FC = () => {
       return;
     }
 
+    // STEP 1: SCANNING
     setState({ status: 'fetching', message: 'Scanning repository...' });
+    setCurrentStep(1); 
 
     try {
       // 1. Fetch Data
       const context = await getRepoContext(repoInfo.owner, repoInfo.repo, githubToken);
       
-      let loadingMsg = 'Generating insights...';
+      // STEP 2: CONTEXT
+      setCurrentStep(2);
+      // Short delay to show the step change visually
+      await new Promise(r => setTimeout(r, 600));
+
+      let loadingMsg = 'Analyzing system structure...';
       if (context.isFallback) {
          loadingMsg = 'GitHub API limit reached. Using inferred analysis...';
-      } else if (deepReasoning) {
-        loadingMsg = 'Performing deep architectural reasoning...';
       }
 
       setState({ status: 'analyzing', message: loadingMsg });
+      
+      // STEP 3: REASONING (Gemini is thinking)
+      setCurrentStep(3);
 
       // 2. Analyze with Gemini (Streaming)
       const analysis = await analyzeRepo(
@@ -94,20 +111,30 @@ const App: React.FC = () => {
         deepReasoning,
         context.isFallback,
         (partialData) => {
-          // Update UI in real-time
+          // STEP 4: GENERATION (Streaming has started)
+          setCurrentStep(4);
+          
+          // Dynamic Message Updates based on content
+          let dynamicMsg = "Generating technical report...";
+          if (partialData.architectureDiagram) dynamicMsg = "Drawing architecture diagram...";
+          else if (partialData.codeQualityRisks.items.length > 0) dynamicMsg = "Identifying security risks...";
+          else if (partialData.componentBreakdown.items.length > 0) dynamicMsg = "Analyzing core components...";
+          
           setState(prev => ({
             ...prev,
             status: 'analyzing',
+            message: dynamicMsg,
             data: partialData
           }));
         }
       );
       
       setState({ status: 'complete', message: 'Analysis complete.', data: analysis });
+      setCurrentStep(4); // Ensure we stay at 4 (Completed state)
+      
     } catch (err: any) {
       let msg = err.message || 'An unexpected error occurred.';
       
-      // Refine error messages
       if (msg.includes('404')) msg = `Repository "${repoInfo.owner}/${repoInfo.repo}" not found. It may be private or deleted.`;
       if (msg.includes('Failed to fetch')) msg = 'Network error. Please check your internet connection.';
       if (msg.includes('Invalid GitHub Token')) msg = 'The provided GitHub Token is invalid. Please update it in settings.';
@@ -117,6 +144,7 @@ const App: React.FC = () => {
         status: 'error', 
         message: msg 
       });
+      setCurrentStep(0);
     }
   };
 
@@ -125,8 +153,8 @@ const App: React.FC = () => {
     setUrl(fullUrl);
   };
 
-  // Determine if we should show results
   const showResults = (state.status === 'complete' || state.status === 'analyzing') && state.data;
+  const showLoading = (state.status === 'fetching' || (state.status === 'analyzing' && !state.data));
 
   return (
     <div className="min-h-screen selection:bg-indigo-500/30 font-sans relative">
@@ -183,7 +211,6 @@ const App: React.FC = () => {
       <header className="border-b border-slate-200 dark:border-white/5 bg-white/70 dark:bg-[#0a0f1e]/80 backdrop-blur-md sticky top-0 z-50 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           
-          {/* Logo & Brand */}
           <div className="flex items-center gap-3 group cursor-default">
             <div className="relative flex items-center justify-center">
                <RepoSenseLogo className="w-8 h-8 group-hover:scale-105 transition-transform duration-300 ease-out" />
@@ -193,7 +220,6 @@ const App: React.FC = () => {
             </h1>
           </div>
 
-          {/* Right Nav */}
           <div className="flex items-center gap-4 md:gap-6">
             <Tooltip content="Settings & API Keys">
               <button 
@@ -255,18 +281,14 @@ const App: React.FC = () => {
           </p>
 
           <form onSubmit={(e) => handleAnalyze(e)} className="relative w-full max-w-2xl mx-auto mb-10 group">
-             {/* Glow Effect */}
             <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur opacity-20 dark:opacity-30 group-hover:opacity-40 dark:group-hover:opacity-60 transition duration-500"></div>
             
-            {/* Input Container */}
             <div className="relative flex items-center bg-white dark:bg-[#0f1629] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl shadow-indigo-500/5 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all duration-300 overflow-hidden h-16">
               
-              {/* Icon */}
               <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-500 transition-colors group-focus-within:text-indigo-500">
                 <GithubIcon className="w-5 h-5" />
               </div>
 
-              {/* Input Field */}
               <input
                 type="text"
                 placeholder="https://github.com/owner/repository"
@@ -277,7 +299,6 @@ const App: React.FC = () => {
                 spellCheck={false}
               />
 
-              {/* Button */}
               <div className="pr-2">
                 <button
                   type="submit"
@@ -302,10 +323,7 @@ const App: React.FC = () => {
             </div>
           </form>
 
-          {/* Controls & Examples */}
           <div className="flex flex-col items-center space-y-8">
-            
-            {/* Analysis Mode & Reasoning Toggle */}
             <div className="flex flex-col md:flex-row items-center justify-center gap-4 text-sm bg-slate-100 dark:bg-slate-900/50 p-2 rounded-2xl border border-slate-200 dark:border-white/5">
               <div className="flex bg-white dark:bg-slate-800/50 rounded-xl p-1 border border-slate-200 dark:border-transparent shadow-sm dark:shadow-none">
                 <Tooltip content="Comprehensive system analysis">
@@ -354,7 +372,6 @@ const App: React.FC = () => {
               </Tooltip>
             </div>
 
-            {/* Example Pills */}
             <div className="flex flex-wrap items-center justify-center gap-3 animate-fade-in">
               <span className="text-xs font-mono text-slate-500 dark:text-slate-500 uppercase tracking-widest mr-1">Examples:</span>
               {EXAMPLE_REPOS.map(repo => (
@@ -387,29 +404,61 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* Loading State / Progress Indicator */}
-        {(state.status === 'fetching' || (state.status === 'analyzing' && !state.data)) && (
-          <div className="max-w-2xl mx-auto mt-16 text-center">
-            <div className="flex flex-col items-center gap-6">
-              <div className="relative w-20 h-20">
-                <div className="absolute inset-0 border-4 border-slate-200 dark:border-slate-800/50 rounded-full"></div>
-                <div className="absolute inset-0 border-4 border-t-indigo-600 dark:border-t-indigo-500 border-r-transparent border-b-transparent border-l-transparent rounded-full animate-spin"></div>
-                <div className="absolute inset-3 border-4 border-slate-200 dark:border-slate-800/50 rounded-full"></div>
-                <div className="absolute inset-3 border-4 border-b-cyan-500 border-r-transparent border-t-transparent border-l-transparent rounded-full animate-spin-reverse"></div>
-              </div>
-              <div>
-                <p className="text-indigo-600 dark:text-indigo-300 font-mono text-lg animate-pulse mb-2">{state.message}</p>
-                <div className="text-sm text-slate-500 dark:text-slate-500 max-w-md mx-auto">
-                  {deepReasoning 
-                    ? "Applying advanced thinking models... (This is slower but deeper)" 
-                    : "Synthesizing system intelligence..."}
+        {/* LOADING STEPS INDICATOR */}
+        {showLoading && (
+           <div className="max-w-2xl mx-auto mt-16">
+              <div className="bg-white dark:bg-[#0f1629] border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-2xl relative overflow-hidden">
+                {/* Background Grid */}
+                <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-800/[0.2] [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))] pointer-events-none" />
+                
+                <h3 className="text-center font-mono font-bold text-slate-800 dark:text-white mb-6 tracking-wide relative z-10">SYSTEM ANALYSIS IN PROGRESS</h3>
+                
+                <div className="space-y-4 relative z-10">
+                  {LOADING_STEPS.map((step, idx) => {
+                    const stepNum = idx + 1;
+                    const isActive = currentStep === stepNum;
+                    const isCompleted = currentStep > stepNum;
+                    const isPending = currentStep < stepNum;
+
+                    return (
+                      <div key={step.id} className={`flex items-center gap-4 p-3 rounded-lg transition-all duration-300 ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/30' : 'border border-transparent'}`}>
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors duration-300 ${
+                          isCompleted ? 'bg-emerald-500 text-white' : 
+                          isActive ? 'bg-indigo-600 text-white' : 
+                          'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600'
+                        }`}>
+                           {isCompleted ? <Check className="w-4 h-4" /> : 
+                            isActive ? <step.icon className="w-4 h-4 animate-pulse" /> : 
+                            <step.icon className="w-4 h-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex justify-between items-center mb-0.5">
+                            <span className={`font-medium text-sm ${isActive || isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-600'}`}>
+                              {step.label}
+                            </span>
+                            {isActive && <span className="text-xs text-indigo-500 font-mono animate-pulse">Processing...</span>}
+                            {isCompleted && <span className="text-xs text-emerald-500 font-mono">Done</span>}
+                          </div>
+                          {/* Progress bar for active step */}
+                          {isActive && (
+                            <div className="h-1 w-full bg-indigo-100 dark:bg-indigo-900/50 rounded-full overflow-hidden mt-1.5">
+                              <div className="h-full bg-indigo-500 animate-progress-indeterminate rounded-full"></div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-center text-xs text-slate-500 dark:text-slate-500 font-mono">
+                  {state.message}
                 </div>
               </div>
-            </div>
-          </div>
+           </div>
         )}
 
-        {/* Results - Now shows during 'analyzing' phase too */}
+        {/* Results */}
         {showResults && state.data && (
           <div className="animate-fade-in-up transition-all duration-500">
             
