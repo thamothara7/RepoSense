@@ -5,7 +5,18 @@ const GITHUB_API_BASE = 'https://api.github.com';
 // Helper to extract owner and repo from URL
 export const parseRepoUrl = (url: string): { owner: string; repo: string } | null => {
   try {
-    const urlObj = new URL(url);
+    let cleanUrl = url.trim();
+    if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
+      cleanUrl = `https://${cleanUrl}`;
+    }
+
+    const urlObj = new URL(cleanUrl);
+    
+    // Strict hostname check
+    if (urlObj.hostname !== 'github.com' && urlObj.hostname !== 'www.github.com') {
+      return null;
+    }
+
     const pathParts = urlObj.pathname.split('/').filter(Boolean);
     if (pathParts.length >= 2) {
       return { owner: pathParts[0], repo: pathParts[1] };

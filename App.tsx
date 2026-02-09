@@ -46,13 +46,13 @@ const App: React.FC = () => {
     const targetUrl = overrideUrl || url;
     
     if (!targetUrl.trim()) {
-      setState({ status: 'error', message: 'Please enter a valid GitHub repository URL.' });
+      setState({ status: 'error', message: 'Please enter a GitHub repository URL.' });
       return;
     }
 
     const repoInfo = parseRepoUrl(targetUrl);
     if (!repoInfo) {
-      setState({ status: 'error', message: 'Invalid GitHub URL. Please use format: https://github.com/owner/repo' });
+      setState({ status: 'error', message: 'Invalid URL. Please use format: https://github.com/owner/repo' });
       return;
     }
 
@@ -83,9 +83,15 @@ const App: React.FC = () => {
       
       setState({ status: 'complete', message: 'Analysis complete.', data: analysis });
     } catch (err: any) {
+      let msg = err.message || 'An unexpected error occurred.';
+      
+      // Refine error messages
+      if (msg.includes('404')) msg = `Repository "${repoInfo.owner}/${repoInfo.repo}" not found. It may be private or deleted.`;
+      if (msg.includes('Failed to fetch')) msg = 'Network error. Please check your internet connection.';
+
       setState({ 
         status: 'error', 
-        message: err.message || 'An unexpected error occurred.' 
+        message: msg 
       });
     }
   };
@@ -104,7 +110,7 @@ const App: React.FC = () => {
           
           {/* Logo & Brand */}
           <div className="flex items-center gap-3 group cursor-default">
-            <div className="w-9 h-9 bg-gradient-to-tr from-indigo-600 to-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/10 group-hover:scale-110 group-hover:rotate-3 transition-transform duration-300 ease-out">
+            <div className="w-9 h-9 bg-gradient-to-tr from-indigo-600 to-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/10 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-indigo-500/50 group-hover:ring-2 group-hover:ring-white/20 transition-all duration-300 ease-out">
               <RepoSenseLogo className="w-5 h-5 text-white" />
             </div>
             <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-500 dark:from-white dark:to-slate-400 font-mono tracking-tight">
