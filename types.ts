@@ -9,6 +9,7 @@ export interface RepoAnalysis {
   improvementSuggestions: SectionContent;
   metaAnalysis: MetaAnalysisData;
   architectureDiagram: string;
+  isFallback?: boolean;
 }
 
 export interface SectionContent {

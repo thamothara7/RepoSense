@@ -96,20 +96,41 @@ export const analyzeRepo = async (
   fileTree: string[],
   files: FileData[],
   mode: AnalysisMode = 'full',
-  deepReasoning: boolean = false
+  deepReasoning: boolean = false,
+  isFallback: boolean = false
 ): Promise<RepoAnalysis> => {
   
-  const fileContext = files.map(f => `
+  let contextSection = "";
+
+  if (isFallback) {
+    contextSection = `
+    CRITICAL NOTICE: The repository files could not be fetched due to GitHub API Rate Limiting.
+    
+    You must perform a "Clean Room" analysis based SOLELY on:
+    1. The repository name: "${repoName}"
+    2. Your internal knowledge base if this is a well-known project.
+    3. Standard architectural patterns for this type of application.
+
+    Rules for Fallback Mode:
+    - Explicitly mention in the PROJECT OVERVIEW that this is an inferred analysis.
+    - Infer the likely technology stack and architecture.
+    - Provide general best-practice improvement suggestions for this specific type of project.
+    - Do NOT hallucinate specific file names unless they are standard conventions (e.g., package.json, Dockerfile).
+    `;
+  } else {
+    const fileContext = files.map(f => `
 --- START FILE: ${f.path} ---
 ${f.content.substring(0, 8000)} 
 --- END FILE: ${f.path} ---
 `).join('\n');
 
-  const treeContext = `
+    const treeContext = `
 --- FILE STRUCTURE (First 300 files) ---
 ${fileTree.join('\n')}
 --- END STRUCTURE ---
 `;
+    contextSection = `${treeContext}\n\n${fileContext}`;
+  }
 
   let structureInstruction = FULL_STRUCTURE;
   if (mode === 'architecture') structureInstruction = ARCHITECTURE_STRUCTURE;
@@ -125,9 +146,7 @@ ${fileTree.join('\n')}
   const prompt = `
 Analyze the repository "${repoName}".
 
-${treeContext}
-
-${fileContext}
+${contextSection}
 
 Provide the RepoSense analysis now.
 `;
@@ -146,7 +165,9 @@ Provide the RepoSense analysis now.
     });
 
     const text = response.text || '';
-    return parseAnalysisResult(text, mode);
+    const result = parseAnalysisResult(text, mode);
+    result.isFallback = isFallback;
+    return result;
   } catch (error: any) {
     console.error("Gemini Analysis Failed:", error);
 

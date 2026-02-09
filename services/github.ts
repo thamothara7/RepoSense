@@ -34,8 +34,8 @@ const fetchRepoTree = async (owner: string, repo: string): Promise<TreeItem[]> =
     if (repoRes.status === 404) {
       throw new Error(`Repository "${owner}/${repo}" not found. It might be private or does not exist.`);
     }
-    if (repoRes.status === 403) {
-      throw new Error("GitHub API rate limit exceeded. Please wait a few minutes before trying again.");
+    if (repoRes.status === 403 || repoRes.status === 429) {
+      throw new Error("RATE_LIMIT");
     }
     throw new Error(`GitHub API Error: ${repoRes.status} ${repoRes.statusText}`);
   }
@@ -50,8 +50,8 @@ const fetchRepoTree = async (owner: string, repo: string): Promise<TreeItem[]> =
     if (treeRes.status === 404) {
       throw new Error(`Could not access file tree for branch "${defaultBranch}".`);
     }
-    if (treeRes.status === 403) {
-      throw new Error("GitHub API rate limit exceeded during tree fetch.");
+    if (treeRes.status === 403 || treeRes.status === 429) {
+      throw new Error("RATE_LIMIT");
     }
     throw new Error(`Failed to fetch repo tree. (${treeRes.status})`);
   }
@@ -116,21 +116,34 @@ const fetchFileContents = async (owner: string, repo: string, files: TreeItem[])
   return results.filter((f): f is FileData => f !== null);
 };
 
-export const getRepoContext = async (owner: string, repo: string): Promise<{ fileTree: string[], files: FileData[] }> => {
-  const tree = await fetchRepoTree(owner, repo);
-  
-  // Get a simplified list of paths for the AI to understand structure
-  // Limit to top 200 files to avoid token overflow in prompt if repo is massive
-  const fileTreePaths = tree
-    .filter(t => t.type === 'blob')
-    .map(t => t.path)
-    .slice(0, 300);
+export const getRepoContext = async (owner: string, repo: string): Promise<{ fileTree: string[], files: FileData[], isFallback: boolean }> => {
+  try {
+    const tree = await fetchRepoTree(owner, repo);
+    
+    // Get a simplified list of paths for the AI to understand structure
+    // Limit to top 200 files to avoid token overflow in prompt if repo is massive
+    const fileTreePaths = tree
+      .filter(t => t.type === 'blob')
+      .map(t => t.path)
+      .slice(0, 300);
 
-  const selectedFiles = selectImportantFiles(tree);
-  const fileContents = await fetchFileContents(owner, repo, selectedFiles);
+    const selectedFiles = selectImportantFiles(tree);
+    const fileContents = await fetchFileContents(owner, repo, selectedFiles);
 
-  return {
-    fileTree: fileTreePaths,
-    files: fileContents
-  };
+    return {
+      fileTree: fileTreePaths,
+      files: fileContents,
+      isFallback: false
+    };
+  } catch (error: any) {
+    if (error.message === 'RATE_LIMIT') {
+      console.warn("GitHub rate limit reached. Returning fallback context.");
+      return {
+        fileTree: [],
+        files: [],
+        isFallback: true
+      };
+    }
+    throw error;
+  }
 };
