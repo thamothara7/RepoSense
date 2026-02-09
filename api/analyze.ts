@@ -1,7 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 
-// Helper for delays
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+export const config = {
+  runtime: 'edge',
+};
 
 export default async function handler(request: Request) {
   if (request.method !== 'POST') {
@@ -23,62 +24,59 @@ export default async function handler(request: Request) {
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    const thinkingBudget = deepReasoning ? 8192 : 2048;
+    
+    // Optimizations for Speed vs Depth:
+    // Standard: Gemini 3 Flash (Fast)
+    // Deep Reasoning: Gemini 3 Pro (High Intelligence, Slower)
+    const modelName = deepReasoning ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
+    
+    // Configure Thinking Budget
+    // Flash: 0 (Disable thinking for max speed) unless needed? Actually Flash supports thinking, 
+    // but for "Instant" feel, we keep it low or disabled.
+    // Pro: 8192 for deep analysis.
+    const thinkingBudget = deepReasoning ? 8192 : 0;
 
-    // Helper to perform the generation with fallback logic
-    const performAnalysis = async (useFallbackModel: boolean) => {
-      // Primary: Gemini 3 Pro | Fallback: Gemini 3 Flash
-      const modelName = useFallbackModel ? 'gemini-3-flash-preview' : 'gemini-3-pro-preview';
-      
-      const config: any = {
-        systemInstruction: systemInstruction,
-      };
-
-      // Only apply thinking budget to non-fallback models (or models that support it)
-      if (!useFallbackModel) {
-        config.thinkingConfig = { thinkingBudget };
-      }
-
-      const response = await ai.models.generateContent({
-        model: modelName,
-        contents: prompt,
-        config: config
-      });
-      
-      return response.text;
+    const genAIConfig: any = {
+      systemInstruction: systemInstruction,
     };
 
-    try {
-      // Attempt 1: Primary Model
-      const text = await performAnalysis(false);
-      return new Response(JSON.stringify({ text }), { 
-        headers: { 'Content-Type': 'application/json' } 
-      });
-
-    } catch (error: any) {
-      console.warn("Primary model failed, attempting fallback...", error.message);
-      
-      // Check for rate limits or server errors
-      const errString = error.toString().toLowerCase();
-      const isRateLimit = errString.includes('429') || errString.includes('quota') || errString.includes('exhausted');
-      const isServerError = errString.includes('500') || errString.includes('503');
-
-      if (isRateLimit || isServerError) {
-        await delay(1000); // Brief pause
-        
-        try {
-          // Attempt 2: Fallback Model
-          const text = await performAnalysis(true);
-          return new Response(JSON.stringify({ text }), { 
-            headers: { 'Content-Type': 'application/json' } 
-          });
-        } catch (fallbackError: any) {
-           throw new Error("Both primary and fallback models failed. Please try again later.");
-        }
-      }
-      
-      throw error;
+    if (deepReasoning) {
+        genAIConfig.thinkingConfig = { thinkingBudget };
     }
+
+    const stream = new ReadableStream({
+      async start(controller) {
+        try {
+          const result = await ai.models.generateContentStream({
+            model: modelName,
+            contents: prompt,
+            config: genAIConfig
+          });
+
+          for await (const chunk of result.stream) {
+            const text = chunk.text();
+            if (text) {
+              controller.enqueue(new TextEncoder().encode(text));
+            }
+          }
+          controller.close();
+        } catch (error: any) {
+          console.error("Streaming Error:", error);
+          // Send a JSON error object in the stream if possible, or just close with error
+          // Since we already started streaming text, we can't cleanly switch to JSON error.
+          // We will log it.
+          controller.error(error);
+        }
+      },
+    });
+
+    return new Response(stream, { 
+      headers: { 
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      } 
+    });
 
   } catch (error: any) {
     console.error("API Error:", error);

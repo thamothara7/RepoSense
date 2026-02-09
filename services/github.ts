@@ -2,123 +2,126 @@ import { FileData } from '../types';
 
 const GITHUB_API_BASE = 'https://api.github.com';
 
-// Helper to extract owner and repo from URL
 export const parseRepoUrl = (url: string): { owner: string; repo: string } | null => {
   try {
     let cleanUrl = url.trim();
     if (!cleanUrl.startsWith('http://') && !cleanUrl.startsWith('https://')) {
       cleanUrl = `https://${cleanUrl}`;
     }
-
     const urlObj = new URL(cleanUrl);
-    
-    // Strict hostname check
-    if (urlObj.hostname !== 'github.com' && urlObj.hostname !== 'www.github.com') {
-      return null;
-    }
-
+    if (urlObj.hostname !== 'github.com' && urlObj.hostname !== 'www.github.com') return null;
     const pathParts = urlObj.pathname.split('/').filter(Boolean);
-    if (pathParts.length >= 2) {
-      return { owner: pathParts[0], repo: pathParts[1] };
-    }
+    if (pathParts.length >= 2) return { owner: pathParts[0], repo: pathParts[1] };
     return null;
   } catch (e) {
     return null;
   }
 };
 
-interface TreeItem {
+interface GithubContentItem {
+  name: string;
   path: string;
-  mode: string;
-  type: 'blob' | 'tree';
-  sha: string;
+  type: 'file' | 'dir';
+  url: string; // API url
   size?: number;
-  url: string;
 }
 
-// Fetch the file tree
-const fetchRepoTree = async (owner: string, repo: string): Promise<TreeItem[]> => {
-  // 1. Get default branch
-  const repoRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`);
-  
-  if (!repoRes.ok) {
-    if (repoRes.status === 404) {
-      throw new Error(`Repository "${owner}/${repo}" not found. It might be private or does not exist.`);
+// Fetch a single directory level
+const fetchDirectory = async (owner: string, repo: string, path: string, token?: string): Promise<GithubContentItem[]> => {
+  const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+  const url = path 
+    ? `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${path}`
+    : `${GITHUB_API_BASE}/repos/${owner}/${repo}/contents`;
+
+  try {
+    // 3s timeout for directory listings
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3000);
+    
+    const res = await fetch(url, { headers, signal: controller.signal });
+    clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      if (res.status === 404) return []; // Directory doesn't exist, just return empty
+      if (res.status === 403 || res.status === 429) throw new Error("RATE_LIMIT");
+      throw new Error(`GitHub API ${res.status}`);
     }
-    if (repoRes.status === 403 || repoRes.status === 429) {
-      throw new Error("RATE_LIMIT");
+
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      return data.map((item: any) => ({
+        name: item.name,
+        path: item.path,
+        type: item.type,
+        url: item.url,
+        size: item.size
+      }));
     }
-    throw new Error(`GitHub API Error: ${repoRes.status} ${repoRes.statusText}`);
+    return [];
+  } catch (e: any) {
+    if (e.message === 'RATE_LIMIT') throw e;
+    console.warn(`Failed to fetch dir: ${path}`, e);
+    return [];
   }
-
-  const repoData = await repoRes.json();
-  const defaultBranch = repoData.default_branch;
-
-  // 2. Get Tree (recursive)
-  const treeRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${defaultBranch}?recursive=1`);
-  
-  if (!treeRes.ok) {
-    if (treeRes.status === 404) {
-      throw new Error(`Could not access file tree for branch "${defaultBranch}".`);
-    }
-    if (treeRes.status === 403 || treeRes.status === 429) {
-      throw new Error("RATE_LIMIT");
-    }
-    throw new Error(`Failed to fetch repo tree. (${treeRes.status})`);
-  }
-
-  const treeData = await treeRes.json();
-  
-  if (treeData.truncated) {
-    console.warn("Repository tree is too large and was truncated by GitHub API.");
-  }
-
-  return treeData.tree;
 };
 
-// Heuristic to select important files for context
-const selectImportantFiles = (tree: TreeItem[]): TreeItem[] => {
-  const IMPORTANT_FILES = [
-    'README.md', 'readme.md',
-    'package.json', 'tsconfig.json', 'go.mod', 'Cargo.toml', 'requirements.txt', 'pom.xml',
-    'docker-compose.yml', 'Dockerfile',
-    'src/index.ts', 'src/index.js', 'src/main.rs', 'main.go', 'src/App.tsx', 'src/App.js'
+const selectImportantFiles = (items: GithubContentItem[]): GithubContentItem[] => {
+  const IMPORTANT_NAMES = [
+    'package.json', 'go.mod', 'cargo.toml', 'requirements.txt', 'pom.xml', 'build.gradle',
+    'dockerfile', 'docker-compose.yml', 'next.config.js', 'tsconfig.json', 'vite.config.ts',
+    'readme.md'
   ];
 
-  // 1. Configs and Readmes (High priority)
-  const highPriority = tree.filter(item => 
-    IMPORTANT_FILES.includes(item.path) || 
-    item.path.endsWith('.md') || 
-    item.path.endsWith('.json')
-  ).slice(0, 5);
+  // 1. Priority Configs (Limit 3)
+  const configs = items.filter(i => 
+    i.type === 'file' && IMPORTANT_NAMES.includes(i.name.toLowerCase())
+  ).slice(0, 3);
 
-  // 2. Source code files (Medium priority) - limit depth
-  const sourceFiles = tree.filter(item => {
-    const isCode = /\.(ts|tsx|js|jsx|py|go|rs|java|c|cpp|h)$/.test(item.path);
-    const isTopLevel = item.path.split('/').length <= 3;
-    return isCode && isTopLevel && !item.path.includes('test') && !item.path.includes('.d.ts');
-  }).slice(0, 10);
+  // 2. Code Entry Points (Limit 4)
+  // Look for index.js, main.go, App.tsx in the list
+  const codeFiles = items.filter(i => {
+    if (i.type !== 'file') return false;
+    const lower = i.name.toLowerCase();
+    // Exclude configs we already checked
+    if (IMPORTANT_NAMES.includes(lower)) return false;
+    
+    return /\.(ts|tsx|js|jsx|py|go|rs|java|c|cpp)$/.test(lower) && 
+           !lower.includes('.test.') && 
+           !lower.includes('.spec.');
+  }).slice(0, 4);
 
-  // Combine and deduplicate
-  const combined = [...highPriority, ...sourceFiles];
-  return Array.from(new Set(combined));
+  // Deduplicate by path
+  const combined = [...configs, ...codeFiles];
+  const unique = new Map();
+  combined.forEach(item => unique.set(item.path, item));
+  
+  return Array.from(unique.values()).slice(0, 7); // Hard cap at 7 files
 };
 
-// Fetch content of specific files
-const fetchFileContents = async (owner: string, repo: string, files: TreeItem[]): Promise<FileData[]> => {
+const fetchFileContents = async (owner: string, repo: string, files: GithubContentItem[], token?: string): Promise<FileData[]> => {
+  const headers: HeadersInit = token ? { Authorization: `Bearer ${token}` } : {};
+
   const promises = files.map(async (file) => {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 3500); // 3.5s max per file
+
     try {
-      const res = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/contents/${file.path}`);
+      // Use the API URL provided in the directory listing to get content
+      const res = await fetch(file.url, { headers, signal: controller.signal });
+      clearTimeout(timeoutId);
+      
       if (!res.ok) return null;
       const data = await res.json();
-      // GitHub API returns content in base64
+
+      // GitHub API returns 'content' in base64
       if (data.content && data.encoding === 'base64') {
-        const decodedContent = atob(data.content.replace(/\n/g, ''));
+        // Remove newlines from base64 string before decoding
+        const cleanBase64 = data.content.replace(/\n/g, '');
+        const decodedContent = atob(cleanBase64);
         return { path: file.path, content: decodedContent };
       }
       return null;
     } catch (e) {
-      console.warn(`Failed to fetch content for ${file.path}`, e);
       return null;
     }
   });
@@ -127,34 +130,43 @@ const fetchFileContents = async (owner: string, repo: string, files: TreeItem[])
   return results.filter((f): f is FileData => f !== null);
 };
 
-export const getRepoContext = async (owner: string, repo: string): Promise<{ fileTree: string[], files: FileData[], isFallback: boolean }> => {
+export const getRepoContext = async (owner: string, repo: string, token?: string): Promise<{ fileTree: string[], files: FileData[], isFallback: boolean }> => {
   try {
-    const tree = await fetchRepoTree(owner, repo);
+    // 1. Fetch Root files (Fast)
+    const rootItems = await fetchDirectory(owner, repo, '', token);
     
-    // Get a simplified list of paths for the AI to understand structure
-    // Limit to top 200 files to avoid token overflow in prompt if repo is massive
-    const fileTreePaths = tree
-      .filter(t => t.type === 'blob')
-      .map(t => t.path)
-      .slice(0, 300);
+    // 2. Identify likely source folders
+    const sourceFolder = rootItems.find(i => 
+      i.type === 'dir' && ['src', 'app', 'lib', 'pkg'].includes(i.name.toLowerCase())
+    );
 
-    const selectedFiles = selectImportantFiles(tree);
-    const fileContents = await fetchFileContents(owner, repo, selectedFiles);
+    // 3. Fetch Source folder if exists (Parallel with processing root)
+    let sourceItems: GithubContentItem[] = [];
+    if (sourceFolder) {
+      sourceItems = await fetchDirectory(owner, repo, sourceFolder.path, token);
+    }
+
+    // Combine lists
+    const allItems = [...rootItems, ...sourceItems];
+
+    // Generate simplified tree for AI context (just the paths we found)
+    const fileTree = allItems.map(i => i.path);
+
+    // Select critical files for content fetching
+    const filesToFetch = selectImportantFiles(allItems);
+    const fileContents = await fetchFileContents(owner, repo, filesToFetch, token);
 
     return {
-      fileTree: fileTreePaths,
+      fileTree,
       files: fileContents,
       isFallback: false
     };
+
   } catch (error: any) {
     if (error.message === 'RATE_LIMIT') {
-      console.warn("GitHub rate limit reached. Returning fallback context.");
-      return {
-        fileTree: [],
-        files: [],
-        isFallback: true
-      };
+      return { fileTree: [], files: [], isFallback: true };
     }
+    // If root fetch fails completely (e.g. 404), bubble up
     throw error;
   }
 };

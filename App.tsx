@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GithubIcon, SearchIcon, Activity, AlertTriangle, Layers, Zap, Cpu, Shield, Layout, RepoSenseLogo, Sun, Moon } from './components/Icons';
+import { GithubIcon, SearchIcon, Activity, AlertTriangle, Layers, Zap, Cpu, Shield, Layout, RepoSenseLogo, Sun, Moon, Settings, Key, X } from './components/Icons';
 import { SectionCard } from './components/SectionCard';
 import { ArchitectureView } from './components/ArchitectureView';
 import { MetaStats } from './components/MetaStats';
@@ -30,6 +30,10 @@ const App: React.FC = () => {
     return 'dark';
   });
 
+  // Settings & Token
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [githubToken, setGithubToken] = useState('');
+
   useEffect(() => {
     const root = window.document.documentElement;
     root.classList.remove('light', 'dark');
@@ -37,8 +41,18 @@ const App: React.FC = () => {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
+  useEffect(() => {
+    const storedToken = localStorage.getItem('github_token');
+    if (storedToken) setGithubToken(storedToken);
+  }, []);
+
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  const handleSaveToken = () => {
+    localStorage.setItem('github_token', githubToken);
+    setIsSettingsOpen(false);
   };
 
   const handleAnalyze = async (e: React.FormEvent, overrideUrl?: string) => {
@@ -56,29 +70,37 @@ const App: React.FC = () => {
       return;
     }
 
-    setState({ status: 'fetching', message: 'Fetching repository structure...' });
+    setState({ status: 'fetching', message: 'Scanning repository...' });
 
     try {
       // 1. Fetch Data
-      const context = await getRepoContext(repoInfo.owner, repoInfo.repo);
+      const context = await getRepoContext(repoInfo.owner, repoInfo.repo, githubToken);
       
-      let loadingMsg = 'Analyzing repository architecture using Gemini 3...';
+      let loadingMsg = 'Generating insights...';
       if (context.isFallback) {
-         loadingMsg = 'GitHub API limit reached. Inferring architecture from repo context...';
+         loadingMsg = 'GitHub API limit reached. Using inferred analysis...';
       } else if (deepReasoning) {
-        loadingMsg = 'Performing deep architectural reasoning (this may take longer)...';
+        loadingMsg = 'Performing deep architectural reasoning...';
       }
 
       setState({ status: 'analyzing', message: loadingMsg });
 
-      // 2. Analyze with Gemini
+      // 2. Analyze with Gemini (Streaming)
       const analysis = await analyzeRepo(
         repoInfo.repo, 
         context.fileTree, 
         context.files, 
         mode, 
         deepReasoning,
-        context.isFallback
+        context.isFallback,
+        (partialData) => {
+          // Update UI in real-time
+          setState(prev => ({
+            ...prev,
+            status: 'analyzing',
+            data: partialData
+          }));
+        }
       );
       
       setState({ status: 'complete', message: 'Analysis complete.', data: analysis });
@@ -88,6 +110,8 @@ const App: React.FC = () => {
       // Refine error messages
       if (msg.includes('404')) msg = `Repository "${repoInfo.owner}/${repoInfo.repo}" not found. It may be private or deleted.`;
       if (msg.includes('Failed to fetch')) msg = 'Network error. Please check your internet connection.';
+      if (msg.includes('Invalid GitHub Token')) msg = 'The provided GitHub Token is invalid. Please update it in settings.';
+      if (msg.includes('timeout')) msg = 'Repository scan timed out. Try a smaller repo or add a Token.';
 
       setState({ 
         status: 'error', 
@@ -101,9 +125,60 @@ const App: React.FC = () => {
     setUrl(fullUrl);
   };
 
+  // Determine if we should show results
+  const showResults = (state.status === 'complete' || state.status === 'analyzing') && state.data;
+
   return (
-    <div className="min-h-screen selection:bg-indigo-500/30 font-sans">
+    <div className="min-h-screen selection:bg-indigo-500/30 font-sans relative">
       
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
+            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+              <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
+                <Settings className="w-4 h-4" />
+                Configuration
+              </h3>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6">
+              <div className="mb-4">
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                  GitHub Personal Access Token
+                </label>
+                <div className="relative">
+                  <div className="absolute left-3 top-2.5 text-slate-400">
+                    <Key className="w-4 h-4" />
+                  </div>
+                  <input 
+                    type="password"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    placeholder="ghp_..."
+                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-800 dark:text-slate-200 text-sm font-mono"
+                  />
+                </div>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Adding a token increases your rate limit from 60 to 5,000 req/hr.
+                  <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline ml-1">
+                    Generate a classic token
+                  </a> (select 'repo' scope).
+                </p>
+              </div>
+              <button 
+                onClick={handleSaveToken}
+                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-indigo-500/20"
+              >
+                Save Configuration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <header className="border-b border-slate-200 dark:border-white/5 bg-white/70 dark:bg-[#0a0f1e]/80 backdrop-blur-md sticky top-0 z-50 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
@@ -120,6 +195,16 @@ const App: React.FC = () => {
 
           {/* Right Nav */}
           <div className="flex items-center gap-4 md:gap-6">
+            <Tooltip content="Settings & API Keys">
+              <button 
+                onClick={() => setIsSettingsOpen(true)}
+                className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-white bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/80 transition-all duration-200"
+                aria-label="Settings"
+              >
+                <Settings className="w-4 h-4" />
+              </button>
+            </Tooltip>
+
             <Tooltip content={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}>
               <button 
                 onClick={toggleTheme}
@@ -199,12 +284,19 @@ const App: React.FC = () => {
                   disabled={state.status === 'fetching' || state.status === 'analyzing'}
                   className="h-11 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 whitespace-nowrap flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                 >
-                  {state.status === 'fetching' || state.status === 'analyzing' ? (
+                  {state.status === 'fetching' ? (
                     <Activity className="animate-spin w-4 h-4" />
+                  ) : state.status === 'analyzing' ? (
+                     <div className="flex items-center gap-2">
+                        <span className="relative flex h-3 w-3">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                        </span>
+                     </div>
                   ) : (
                     <SearchIcon className="w-4 h-4" />
                   )}
-                  <span>Analyze</span>
+                  <span>{state.status === 'fetching' || state.status === 'analyzing' ? 'Processing' : 'Analyze'}</span>
                 </button>
               </div>
             </div>
@@ -247,7 +339,7 @@ const App: React.FC = () => {
 
               <div className="w-px h-8 bg-slate-300 dark:bg-white/10 hidden md:block"></div>
 
-              <Tooltip content="Enable extended thinking budget for deeper insights (slower)">
+              <Tooltip content="Deep Reasoning uses Gemini 3 Pro (Slower but deeper). Default is Gemini 3 Flash (Instant).">
                 <button 
                   type="button"
                   onClick={() => setDeepReasoning(!deepReasoning)}
@@ -295,8 +387,8 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* Loading State */}
-        {(state.status === 'fetching' || state.status === 'analyzing') && (
+        {/* Loading State / Progress Indicator */}
+        {(state.status === 'fetching' || (state.status === 'analyzing' && !state.data)) && (
           <div className="max-w-2xl mx-auto mt-16 text-center">
             <div className="flex flex-col items-center gap-6">
               <div className="relative w-20 h-20">
@@ -309,7 +401,7 @@ const App: React.FC = () => {
                 <p className="text-indigo-600 dark:text-indigo-300 font-mono text-lg animate-pulse mb-2">{state.message}</p>
                 <div className="text-sm text-slate-500 dark:text-slate-500 max-w-md mx-auto">
                   {deepReasoning 
-                    ? "Applying advanced thinking models to infer design patterns and trade-offs..." 
+                    ? "Applying advanced thinking models... (This is slower but deeper)" 
                     : "Synthesizing system intelligence..."}
                 </div>
               </div>
@@ -317,21 +409,30 @@ const App: React.FC = () => {
           </div>
         )}
 
-        {/* Results */}
-        {state.status === 'complete' && state.data && (
+        {/* Results - Now shows during 'analyzing' phase too */}
+        {showResults && state.data && (
           <div className="animate-fade-in-up transition-all duration-500">
             
+            {/* Status Bar for Streaming */}
+            {state.status === 'analyzing' && (
+               <div className="mb-8 w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden relative">
+                  <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-indigo-500 to-cyan-400 w-full animate-progress-indeterminate origin-left"></div>
+               </div>
+            )}
+
             {/* Rate Limit Banner */}
             {state.data.isFallback && (
               <div className="mb-8 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 rounded-lg flex items-start gap-3 shadow-sm">
                 <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                <div>
+                <div className="flex-1">
                   <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200 mb-1">
                     GitHub API rate limit reached. Switching to fallback analysis mode.
                   </h3>
                   <p className="text-sm text-amber-700 dark:text-amber-400/80 leading-relaxed">
-                    RepoSense is currently analyzing this repository based on its name and ecosystem context because direct file access was limited by GitHub. 
-                    This is a temporary state.
+                    RepoSense is currently analyzing this repository based on its name and ecosystem context because direct file access was limited.
+                    <button onClick={() => setIsSettingsOpen(true)} className="underline ml-1 hover:text-amber-900 dark:hover:text-white">
+                      Add a GitHub Token to fix this.
+                    </button>
                   </p>
                 </div>
               </div>
@@ -400,6 +501,17 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+      
+      <style>{`
+        @keyframes progress-indeterminate {
+          0% { transform: translateX(-100%) scaleX(0.2); }
+          50% { transform: translateX(0%) scaleX(0.5); }
+          100% { transform: translateX(100%) scaleX(0.2); }
+        }
+        .animate-progress-indeterminate {
+          animation: progress-indeterminate 1.5s infinite linear;
+        }
+      `}</style>
     </div>
   );
 };

@@ -91,7 +91,8 @@ export const analyzeRepo = async (
   files: FileData[],
   mode: AnalysisMode = 'full',
   deepReasoning: boolean = false,
-  isFallback: boolean = false
+  isFallback: boolean = false,
+  onProgress?: (partialData: RepoAnalysis) => void
 ): Promise<RepoAnalysis> => {
 
   let contextSection = "";
@@ -104,22 +105,20 @@ export const analyzeRepo = async (
     1. The repository name: "${repoName}"
     2. Your internal knowledge base if this is a well-known project.
     3. Standard architectural patterns for this type of application.
-
-    Rules for Fallback Mode:
-    - Explicitly mention in the PROJECT OVERVIEW that this is an inferred analysis.
-    - Infer the likely technology stack and architecture.
-    - Provide general best-practice improvement suggestions for this specific type of project.
-    - Do NOT hallucinate specific file names unless they are standard conventions (e.g., package.json, Dockerfile).
     `;
   } else {
+    // Optimization: Truncate file content to 5000 chars to reduce prompt size and speed up generation.
+    // Large prompts significantly increase Time To First Token.
+    const MAX_CHAR_COUNT = deepReasoning ? 12000 : 5000;
+    
     const fileContext = files.map(f => `
 --- START FILE: ${f.path} ---
-${f.content.substring(0, 8000)} 
+${f.content.substring(0, MAX_CHAR_COUNT)} 
 --- END FILE: ${f.path} ---
 `).join('\n');
 
     const treeContext = `
---- FILE STRUCTURE (First 300 files) ---
+--- FILE STRUCTURE (First 200 files) ---
 ${fileTree.join('\n')}
 --- END STRUCTURE ---
 `;
@@ -145,7 +144,6 @@ ${contextSection}
 Provide the RepoSense analysis now.
 `;
 
-  // --- NEW: Call the backend API instead of Google directly ---
   try {
     const response = await fetch('/api/analyze', {
       method: 'POST',
@@ -164,15 +162,37 @@ Provide the RepoSense analysis now.
       throw new Error(errorData.error || `Server Error: ${response.status}`);
     }
 
-    const data = await response.json();
-    const result = parseAnalysisResult(data.text || '', mode);
-    result.isFallback = isFallback;
-    return result;
+    if (!response.body) throw new Error("No response body received");
+
+    // Streaming Logic
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let accumulatedText = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      accumulatedText += chunk;
+
+      // Incrementally parse and notify UI
+      if (onProgress) {
+        const partialData = parseAnalysisResult(accumulatedText, mode);
+        partialData.isFallback = isFallback;
+        onProgress(partialData);
+      }
+    }
+
+    // Final Parse
+    const finalResult = parseAnalysisResult(accumulatedText, mode);
+    finalResult.isFallback = isFallback;
+    return finalResult;
 
   } catch (error: any) {
     console.error("Analysis Failed:", error);
     let msg = error.message;
-    if (msg.includes('504')) msg = "Analysis timed out (Repository might be too large for the serverless function limit).";
+    if (msg.includes('504')) msg = "Analysis timed out. The repository might be too large.";
     throw new Error(msg);
   }
 };
@@ -195,12 +215,21 @@ const parseAnalysisResult = (text: string, mode: AnalysisMode): RepoAnalysis => 
     }
 
     if (currentSection === AnalysisSection.Diagram) {
-      diagram += line + '\n';
+      // Preserve indentation for diagrams
+      if (line !== trimmed) {
+         diagram += line + '\n';
+      } else {
+         diagram += trimmed + '\n';
+      }
       continue;
     }
 
     if (currentSection && trimmed) {
-      sections[currentSection].push(trimmed.replace(/^[-•*]\s/, ''));
+      // Remove Markdown bullets for cleaner cards
+      const cleanLine = trimmed.replace(/^[-•*]\s/, '');
+      if (cleanLine) {
+        sections[currentSection].push(cleanLine);
+      }
     }
   }
 
