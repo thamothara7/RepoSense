@@ -1,9 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import { AnalysisSection, RepoAnalysis, SectionContent, FileData, MetaAnalysisData, AnalysisMode } from '../types';
 
-// Initialize GenAI
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
 const BASE_SYSTEM_INSTRUCTION = `
 You are RepoSense, a professional code intelligence engine. 
 Your task is to analyze the provided GitHub repository context (file structure and key file contents) and generate a deep, system-level technical report.
@@ -89,6 +86,15 @@ Required Output Structure (Risks Mode):
 - Maintainability Rating: [Low/Medium/High]
 `;
 
+// Helper to get AI instance safely
+const getAIClient = () => {
+  const apiKey = process.env.API_KEY;
+  if (!apiKey) {
+    throw new Error("API Key is missing. Please check your environment variables.");
+  }
+  return new GoogleGenAI({ apiKey });
+};
+
 export const analyzeRepo = async (
   repoName: string,
   fileTree: string[],
@@ -98,6 +104,9 @@ export const analyzeRepo = async (
   isFallback: boolean = false
 ): Promise<RepoAnalysis> => {
   
+  // Initialize AI client lazily
+  const ai = getAIClient();
+
   let contextSection = "";
 
   if (isFallback) {
@@ -154,9 +163,7 @@ Provide the RepoSense analysis now.
 
   const performAnalysis = async (useFallbackModel: boolean) => {
       const modelName = useFallbackModel ? 'gemini-3-flash-preview' : 'gemini-3-pro-preview';
-      // Only apply thinking budget to the Pro model or if explicitly desired. 
-      // Flash preview often handles requests better without thinking config or with lower budget if it's unstable.
-      // For stability, we disable thinking config in the fallback call.
+      
       const config: any = {
         systemInstruction: systemInstruction,
       };
@@ -192,7 +199,6 @@ Provide the RepoSense analysis now.
             return result;
         } catch (fallbackError: any) {
             console.error("Fallback model also failed:", fallbackError);
-            // Fall through to throw the main error logic, but maybe update the message
         }
     }
 
