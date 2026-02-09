@@ -110,10 +110,10 @@ const App: React.FC = () => {
           
           {/* Logo & Brand */}
           <div className="flex items-center gap-3 group cursor-default">
-            <div className="w-9 h-9 bg-gradient-to-tr from-indigo-600 to-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-indigo-500/20 ring-1 ring-white/10 group-hover:scale-110 group-hover:rotate-3 group-hover:shadow-indigo-500/50 group-hover:ring-2 group-hover:ring-white/20 transition-all duration-300 ease-out">
-              <RepoSenseLogo className="w-5 h-5 text-white" />
+            <div className="relative flex items-center justify-center">
+               <RepoSenseLogo className="w-8 h-8 group-hover:scale-105 transition-transform duration-300 ease-out" />
             </div>
-            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-slate-800 to-slate-500 dark:from-white dark:to-slate-400 font-mono tracking-tight">
+            <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 font-mono tracking-tight leading-none pt-0.5">
               RepoSense
             </h1>
           </div>
@@ -169,30 +169,44 @@ const App: React.FC = () => {
             Understand complex GitHub repositories in seconds. Deep system analysis, architecture visualization, and risk assessment powered by AI.
           </p>
 
-          <form onSubmit={(e) => handleAnalyze(e)} className="relative group mb-10 max-w-2xl mx-auto">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-xl blur opacity-20 dark:opacity-30 group-hover:opacity-40 dark:group-hover:opacity-60 transition duration-500"></div>
-            <div className="relative flex items-center bg-white dark:bg-[#0f1629] rounded-xl p-2 border border-slate-200 dark:border-slate-700/50 shadow-xl transition-all duration-300 focus-within:border-indigo-500/50 focus-within:shadow-indigo-500/10 dark:focus-within:shadow-indigo-500/20">
-              <GithubIcon className="ml-4 text-slate-400 dark:text-slate-500 w-5 h-5" />
+          <form onSubmit={(e) => handleAnalyze(e)} className="relative w-full max-w-2xl mx-auto mb-10 group">
+             {/* Glow Effect */}
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur opacity-20 dark:opacity-30 group-hover:opacity-40 dark:group-hover:opacity-60 transition duration-500"></div>
+            
+            {/* Input Container */}
+            <div className="relative flex items-center bg-white dark:bg-[#0f1629] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl shadow-indigo-500/5 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all duration-300 overflow-hidden h-16">
+              
+              {/* Icon */}
+              <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-500 transition-colors group-focus-within:text-indigo-500">
+                <GithubIcon className="w-5 h-5" />
+              </div>
+
+              {/* Input Field */}
               <input
                 type="text"
                 placeholder="https://github.com/owner/repository"
-                className="flex-1 bg-transparent border-none focus:ring-0 text-slate-800 dark:text-slate-200 placeholder-slate-400 dark:placeholder-slate-500 px-4 py-3 font-mono text-sm"
+                className="flex-1 bg-transparent border-none outline-none focus:ring-0 px-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm h-full w-full"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 disabled={state.status === 'fetching' || state.status === 'analyzing'}
+                spellCheck={false}
               />
-              <button
-                type="submit"
-                disabled={state.status === 'fetching' || state.status === 'analyzing'}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-lg font-medium transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 hover:shadow-lg hover:shadow-indigo-500/20 hover:scale-[1.02] active:scale-[0.98]"
-              >
-                {state.status === 'fetching' || state.status === 'analyzing' ? (
-                  <Activity className="animate-spin w-4 h-4" />
-                ) : (
-                  <SearchIcon className="w-4 h-4" />
-                )}
-                <span>Analyze</span>
-              </button>
+
+              {/* Button */}
+              <div className="pr-2">
+                <button
+                  type="submit"
+                  disabled={state.status === 'fetching' || state.status === 'analyzing'}
+                  className="h-11 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 whitespace-nowrap flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                >
+                  {state.status === 'fetching' || state.status === 'analyzing' ? (
+                    <Activity className="animate-spin w-4 h-4" />
+                  ) : (
+                    <SearchIcon className="w-4 h-4" />
+                  )}
+                  <span>Analyze</span>
+                </button>
+              </div>
             </div>
           </form>
 

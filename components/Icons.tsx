@@ -1,11 +1,14 @@
 import React from 'react';
 
+// New "System Intelligence" Logo
+// Concept: A hexagon representing structure, with internal connections representing insight/logic.
 export const RepoSenseLogo = ({ className }: { className?: string }) => (
-  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7Z" />
-    <polyline points="8 10 10 12 8 14" />
-    <polyline points="16 10 14 12 16 14" />
-    <line x1="12" y1="10" x2="12" y2="14" strokeWidth="2" strokeLinecap="square" />
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" className="text-slate-800 dark:text-white" strokeWidth="2" />
+    <path d="M12 12L12 22" className="text-indigo-500 dark:text-indigo-400" />
+    <path d="M12 12L20.66 7" className="text-indigo-500 dark:text-indigo-400" />
+    <path d="M12 12L3.34 7" className="text-indigo-500 dark:text-indigo-400" />
+    <circle cx="12" cy="12" r="3" className="fill-indigo-500 stroke-none" />
   </svg>
 );
 
