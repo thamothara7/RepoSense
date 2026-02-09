@@ -1,4 +1,3 @@
-import { GoogleGenAI } from "@google/genai";
 import { AnalysisSection, RepoAnalysis, SectionContent, FileData, MetaAnalysisData, AnalysisMode } from '../types';
 
 const BASE_SYSTEM_INSTRUCTION = `
@@ -86,18 +85,6 @@ Required Output Structure (Risks Mode):
 - Maintainability Rating: [Low/Medium/High]
 `;
 
-// Helper for delays
-const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
-
-// Helper to get AI instance safely
-const getAIClient = () => {
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please add VITE_API_KEY to your .env file or Vercel Environment Variables.");
-  }
-  return new GoogleGenAI({ apiKey });
-};
-
 export const analyzeRepo = async (
   repoName: string,
   fileTree: string[],
@@ -106,9 +93,6 @@ export const analyzeRepo = async (
   deepReasoning: boolean = false,
   isFallback: boolean = false
 ): Promise<RepoAnalysis> => {
-  
-  // Initialize AI client lazily
-  const ai = getAIClient();
 
   let contextSection = "";
 
@@ -161,77 +145,34 @@ ${contextSection}
 Provide the RepoSense analysis now.
 `;
 
-  // Increase budget for deep reasoning
-  const thinkingBudget = deepReasoning ? 8192 : 2048;
-
-  const performAnalysis = async (useFallbackModel: boolean) => {
-      // If we are using the fallback model, use 'gemini-3-flash-preview' or 'gemini-2.5-flash-latest' for better quota
-      const modelName = useFallbackModel ? 'gemini-3-flash-preview' : 'gemini-3-pro-preview';
-      
-      const config: any = {
-        systemInstruction: systemInstruction,
-      };
-      
-      // Thinking budget is only for Gemini 3 models; if we ever fallback to 2.5, remove this.
-      // Currently defaulting to Flash Preview which supports it.
-      if (!useFallbackModel) {
-          config.thinkingConfig = { thinkingBudget };
-      }
-
-      return await ai.models.generateContent({
-        model: modelName,
-        contents: prompt,
-        config: config
-      });
-  };
-
+  // --- NEW: Call the backend API instead of Google directly ---
   try {
-    const response = await performAnalysis(false);
-    const text = response.text || '';
-    const result = parseAnalysisResult(text, mode);
+    const response = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        systemInstruction,
+        deepReasoning
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || `Server Error: ${response.status}`);
+    }
+
+    const data = await response.json();
+    const result = parseAnalysisResult(data.text || '', mode);
     result.isFallback = isFallback;
     return result;
+
   } catch (error: any) {
-    const errString = error.toString().toLowerCase();
-    
-    // Improved Error Handling: Catch 429 (Too Many Requests), 503 (Unavailable), 500 (Internal), or Quota Exceeded
-    const isRateLimit = errString.includes('429') || errString.includes('quota') || errString.includes('exhausted');
-    const isServerError = errString.includes('500') || errString.includes('503') || errString.includes('internal error');
-
-    if (isRateLimit || isServerError) {
-        console.warn(`Primary model failed (Rate Limit or Server Error). Retrying with Flash model... Error: ${error.message}`);
-        
-        // Wait 1 second before retrying to let the API breathe
-        await delay(1500);
-
-        try {
-            const fallbackResponse = await performAnalysis(true);
-            const text = fallbackResponse.text || '';
-            const result = parseAnalysisResult(text, mode);
-            result.isFallback = isFallback;
-            return result;
-        } catch (fallbackError: any) {
-            console.error("Fallback model also failed:", fallbackError);
-            
-            // If fallback also fails on rate limit, return a specific message
-            if (fallbackError.toString().includes('429')) {
-                 throw new Error("Gemini API is currently overloaded (Rate Limit Exceeded). Please wait a minute and try again.");
-            }
-        }
-    }
-
-    console.error("Gemini Analysis Failed:", error);
-
-    let msg = "Failed to generate analysis. The repository might be too large or complex.";
-    
-    if (errString.includes('api key') || errString.includes('403')) {
-        msg = "Invalid or missing API Key. Please check your environment configuration.";
-    } else if (isRateLimit) {
-        msg = "Gemini API rate limit exceeded. Please try again later.";
-    } else if (isServerError) {
-        msg = "Gemini API service is temporarily unavailable. Please try again.";
-    }
-
+    console.error("Analysis Failed:", error);
+    let msg = error.message;
+    if (msg.includes('504')) msg = "Analysis timed out (Repository might be too large for the serverless function limit).";
     throw new Error(msg);
   }
 };
