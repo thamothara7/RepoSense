@@ -152,26 +152,54 @@ Provide the RepoSense analysis now.
   // Increase budget for deep reasoning
   const thinkingBudget = deepReasoning ? 8192 : 2048;
 
-  try {
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', 
-      contents: prompt,
-      config: {
+  const performAnalysis = async (useFallbackModel: boolean) => {
+      const modelName = useFallbackModel ? 'gemini-3-flash-preview' : 'gemini-3-pro-preview';
+      // Only apply thinking budget to the Pro model or if explicitly desired. 
+      // Flash preview often handles requests better without thinking config or with lower budget if it's unstable.
+      // For stability, we disable thinking config in the fallback call.
+      const config: any = {
         systemInstruction: systemInstruction,
-        thinkingConfig: { thinkingBudget }, 
+      };
+      
+      if (!useFallbackModel) {
+          config.thinkingConfig = { thinkingBudget };
       }
-    });
 
+      return await ai.models.generateContent({
+        model: modelName,
+        contents: prompt,
+        config: config
+      });
+  };
+
+  try {
+    const response = await performAnalysis(false);
     const text = response.text || '';
     const result = parseAnalysisResult(text, mode);
     result.isFallback = isFallback;
     return result;
   } catch (error: any) {
+    const errString = error.toString().toLowerCase();
+    
+    // Check for 500/503/Internal Error to trigger fallback
+    if (errString.includes('500') || errString.includes('503') || errString.includes('internal error')) {
+        console.warn("Primary model (Gemini 3 Pro) failed with internal error. Attempting fallback to Gemini 3 Flash.");
+        try {
+            const fallbackResponse = await performAnalysis(true);
+            const text = fallbackResponse.text || '';
+            const result = parseAnalysisResult(text, mode);
+            result.isFallback = isFallback;
+            return result;
+        } catch (fallbackError: any) {
+            console.error("Fallback model also failed:", fallbackError);
+            // Fall through to throw the main error logic, but maybe update the message
+        }
+    }
+
     console.error("Gemini Analysis Failed:", error);
 
     let msg = "Failed to generate analysis. The repository might be too large or complex.";
-    const errString = error.toString().toLowerCase();
-
+    
     if (errString.includes('api key') || errString.includes('403')) {
         msg = "Invalid or missing API Key. Please check your environment configuration.";
     } else if (errString.includes('429') || errString.includes('exhausted') || errString.includes('quota')) {
