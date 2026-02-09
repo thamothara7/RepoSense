@@ -29,13 +29,33 @@ interface TreeItem {
 const fetchRepoTree = async (owner: string, repo: string): Promise<TreeItem[]> => {
   // 1. Get default branch
   const repoRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}`);
-  if (!repoRes.ok) throw new Error(`GitHub Repo not found or rate limited. (${repoRes.status})`);
+  
+  if (!repoRes.ok) {
+    if (repoRes.status === 404) {
+      throw new Error(`Repository "${owner}/${repo}" not found. It might be private or does not exist.`);
+    }
+    if (repoRes.status === 403) {
+      throw new Error("GitHub API rate limit exceeded. Please wait a few minutes before trying again.");
+    }
+    throw new Error(`GitHub API Error: ${repoRes.status} ${repoRes.statusText}`);
+  }
+
   const repoData = await repoRes.json();
   const defaultBranch = repoData.default_branch;
 
   // 2. Get Tree (recursive)
   const treeRes = await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/git/trees/${defaultBranch}?recursive=1`);
-  if (!treeRes.ok) throw new Error(`Failed to fetch repo tree. (${treeRes.status})`);
+  
+  if (!treeRes.ok) {
+    if (treeRes.status === 404) {
+      throw new Error(`Could not access file tree for branch "${defaultBranch}".`);
+    }
+    if (treeRes.status === 403) {
+      throw new Error("GitHub API rate limit exceeded during tree fetch.");
+    }
+    throw new Error(`Failed to fetch repo tree. (${treeRes.status})`);
+  }
+
   const treeData = await treeRes.json();
   
   if (treeData.truncated) {

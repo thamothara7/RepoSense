@@ -1,18 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
-import { AnalysisSection, RepoAnalysis, SectionContent, FileData, MetaAnalysisData } from '../types';
+import { AnalysisSection, RepoAnalysis, SectionContent, FileData, MetaAnalysisData, AnalysisMode } from '../types';
 
 const API_KEY = process.env.API_KEY || '';
 
 // Initialize GenAI
 const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-const SYSTEM_INSTRUCTION = `
+const BASE_SYSTEM_INSTRUCTION = `
 You are RepoSense, a professional code intelligence engine. 
 Your task is to analyze the provided GitHub repository context (file structure and key file contents) and generate a deep, system-level technical report.
-
-Your output must be structured exactly into the following sections with their specific headers. 
 Do not add conversational filler. Be technical, concise, and professional.
+`;
 
+const FULL_STRUCTURE = `
 Required Output Structure:
 
 === PROJECT OVERVIEW ===
@@ -54,10 +54,49 @@ For each important component identified:
 [Generate a detailed ASCII diagram here]
 `;
 
+const ARCHITECTURE_STRUCTURE = `
+Required Output Structure (Architecture Mode):
+
+=== ARCHITECTURE SUMMARY ===
+- Architectural style
+- Major modules
+- Key design decisions
+
+=== META ANALYSIS ===
+- Code Quality Score: [1-10]
+- Project Complexity Level: [Beginner/Intermediate/Advanced]
+- Maintainability Rating: [Low/Medium/High]
+
+=== ARCHITECTURE DIAGRAM ===
+[Generate a detailed ASCII diagram here]
+`;
+
+const RISKS_STRUCTURE = `
+Required Output Structure (Risks Mode):
+
+=== CODE QUALITY & RISKS ===
+- Potential bugs
+- Security risks
+- Scalability concerns
+- Anti-patterns
+
+=== IMPROVEMENT SUGGESTIONS ===
+- Short-term fixes
+- Medium-term improvements
+- Long-term recommendations
+
+=== META ANALYSIS ===
+- Code Quality Score: [1-10]
+- Project Complexity Level: [Beginner/Intermediate/Advanced]
+- Maintainability Rating: [Low/Medium/High]
+`;
+
 export const analyzeRepo = async (
   repoName: string,
   fileTree: string[],
-  files: FileData[]
+  files: FileData[],
+  mode: AnalysisMode = 'full',
+  deepReasoning: boolean = false
 ): Promise<RepoAnalysis> => {
   
   const fileContext = files.map(f => `
@@ -72,6 +111,17 @@ ${fileTree.join('\n')}
 --- END STRUCTURE ---
 `;
 
+  let structureInstruction = FULL_STRUCTURE;
+  if (mode === 'architecture') structureInstruction = ARCHITECTURE_STRUCTURE;
+  if (mode === 'risks') structureInstruction = RISKS_STRUCTURE;
+
+  let reasoningInstruction = "";
+  if (deepReasoning) {
+    reasoningInstruction = "\nCRITICAL: ENABLE DEEP REASONING. Explain WHY architectural decisions were likely made. Highlight trade-offs and alternative designs in your analysis. Be verbose in your architectural reasoning.";
+  }
+
+  const systemInstruction = `${BASE_SYSTEM_INSTRUCTION}\n${structureInstruction}\n${reasoningInstruction}`;
+
   const prompt = `
 Analyze the repository "${repoName}".
 
@@ -82,25 +132,40 @@ ${fileContext}
 Provide the RepoSense analysis now.
 `;
 
+  // Increase budget for deep reasoning
+  const thinkingBudget = deepReasoning ? 8192 : 2048;
+
   try {
     const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-preview', // Using pro for complex code reasoning
+      model: 'gemini-3-pro-preview', 
       contents: prompt,
       config: {
-        systemInstruction: SYSTEM_INSTRUCTION,
-        thinkingConfig: { thinkingBudget: 2048 }, // Enable thinking for better architecture analysis
+        systemInstruction: systemInstruction,
+        thinkingConfig: { thinkingBudget }, 
       }
     });
 
     const text = response.text || '';
-    return parseAnalysisResult(text);
-  } catch (error) {
+    return parseAnalysisResult(text, mode);
+  } catch (error: any) {
     console.error("Gemini Analysis Failed:", error);
-    throw new Error("Failed to generate analysis. The repository might be too large or the API key is invalid.");
+
+    let msg = "Failed to generate analysis. The repository might be too large or complex.";
+    const errString = error.toString().toLowerCase();
+
+    if (errString.includes('api key') || errString.includes('403')) {
+        msg = "Invalid or missing API Key. Please check your environment configuration.";
+    } else if (errString.includes('429') || errString.includes('exhausted') || errString.includes('quota')) {
+        msg = "Gemini API rate limit exceeded. Please try again later.";
+    } else if (errString.includes('500') || errString.includes('503')) {
+        msg = "Gemini API service is temporarily unavailable. Please try again.";
+    }
+
+    throw new Error(msg);
   }
 };
 
-const parseAnalysisResult = (text: string): RepoAnalysis => {
+const parseAnalysisResult = (text: string, mode: AnalysisMode): RepoAnalysis => {
   const sections: Record<string, string[]> = {};
   let currentSection: string | null = null;
   let diagram = '';
@@ -123,7 +188,6 @@ const parseAnalysisResult = (text: string): RepoAnalysis => {
     }
 
     if (currentSection && trimmed) {
-      // Remove bullet points for cleaner array storage if needed, or keep them
       sections[currentSection].push(trimmed.replace(/^[-•*]\s/, ''));
     }
   }
@@ -131,7 +195,7 @@ const parseAnalysisResult = (text: string): RepoAnalysis => {
   // Helper to get section safely
   const getSection = (key: string): SectionContent => ({
     title: key,
-    items: sections[key] || ['No data available.']
+    items: sections[key] || []
   });
 
   // Parse Meta Analysis specifically

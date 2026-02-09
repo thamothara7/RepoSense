@@ -1,3 +1,5 @@
+export type AnalysisMode = 'full' | 'architecture' | 'risks';
+
 export interface RepoAnalysis {
   projectOverview: SectionContent;
   architectureSummary: SectionContent;
