@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+  <style>
+    .base { stroke: #1e293b; stroke-width: 2; }
+    .brand { stroke: #6366f1; }
+    .brand-fill { fill: #6366f1; stroke: none; }
+    @media (prefers-color-scheme: dark) {
+      .base { stroke: #f8fafc; }
+      .brand { stroke: #818cf8; }
+      .brand-fill { fill: #818cf8; }
+    }
+  </style>
+  <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" class="base" />
+  <path d="M12 12L12 22" class="brand" />
+  <path d="M12 12L20.66 7" class="brand" />
+  <path d="M12 12L3.34 7" class="brand" />
+  <circle cx="12" cy="12" r="3" class="brand-fill" />
+</svg>

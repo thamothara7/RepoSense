@@ -86,11 +86,14 @@ Required Output Structure (Risks Mode):
 - Maintainability Rating: [Low/Medium/High]
 `;
 
+// Helper for delays
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper to get AI instance safely
 const getAIClient = () => {
   const apiKey = process.env.API_KEY;
   if (!apiKey) {
-    throw new Error("API Key is missing. Please check your environment variables.");
+    throw new Error("API Key is missing. Please add VITE_API_KEY to your .env file or Vercel Environment Variables.");
   }
   return new GoogleGenAI({ apiKey });
 };
@@ -162,12 +165,15 @@ Provide the RepoSense analysis now.
   const thinkingBudget = deepReasoning ? 8192 : 2048;
 
   const performAnalysis = async (useFallbackModel: boolean) => {
+      // If we are using the fallback model, use 'gemini-3-flash-preview' or 'gemini-2.5-flash-latest' for better quota
       const modelName = useFallbackModel ? 'gemini-3-flash-preview' : 'gemini-3-pro-preview';
       
       const config: any = {
         systemInstruction: systemInstruction,
       };
       
+      // Thinking budget is only for Gemini 3 models; if we ever fallback to 2.5, remove this.
+      // Currently defaulting to Flash Preview which supports it.
       if (!useFallbackModel) {
           config.thinkingConfig = { thinkingBudget };
       }
@@ -188,9 +194,16 @@ Provide the RepoSense analysis now.
   } catch (error: any) {
     const errString = error.toString().toLowerCase();
     
-    // Check for 500/503/Internal Error to trigger fallback
-    if (errString.includes('500') || errString.includes('503') || errString.includes('internal error')) {
-        console.warn("Primary model (Gemini 3 Pro) failed with internal error. Attempting fallback to Gemini 3 Flash.");
+    // Improved Error Handling: Catch 429 (Too Many Requests), 503 (Unavailable), 500 (Internal), or Quota Exceeded
+    const isRateLimit = errString.includes('429') || errString.includes('quota') || errString.includes('exhausted');
+    const isServerError = errString.includes('500') || errString.includes('503') || errString.includes('internal error');
+
+    if (isRateLimit || isServerError) {
+        console.warn(`Primary model failed (Rate Limit or Server Error). Retrying with Flash model... Error: ${error.message}`);
+        
+        // Wait 1 second before retrying to let the API breathe
+        await delay(1500);
+
         try {
             const fallbackResponse = await performAnalysis(true);
             const text = fallbackResponse.text || '';
@@ -199,6 +212,11 @@ Provide the RepoSense analysis now.
             return result;
         } catch (fallbackError: any) {
             console.error("Fallback model also failed:", fallbackError);
+            
+            // If fallback also fails on rate limit, return a specific message
+            if (fallbackError.toString().includes('429')) {
+                 throw new Error("Gemini API is currently overloaded (Rate Limit Exceeded). Please wait a minute and try again.");
+            }
         }
     }
 
@@ -208,9 +226,9 @@ Provide the RepoSense analysis now.
     
     if (errString.includes('api key') || errString.includes('403')) {
         msg = "Invalid or missing API Key. Please check your environment configuration.";
-    } else if (errString.includes('429') || errString.includes('exhausted') || errString.includes('quota')) {
+    } else if (isRateLimit) {
         msg = "Gemini API rate limit exceeded. Please try again later.";
-    } else if (errString.includes('500') || errString.includes('503')) {
+    } else if (isServerError) {
         msg = "Gemini API service is temporarily unavailable. Please try again.";
     }
 
