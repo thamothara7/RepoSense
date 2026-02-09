@@ -1,7 +1,31 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type, Schema } from "@google/genai";
 
 export const config = {
   runtime: 'edge',
+};
+
+// Schema definition matching client side
+const analysisSchema: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    projectOverview: { type: Type.ARRAY, items: { type: Type.STRING } },
+    architectureSummary: { type: Type.ARRAY, items: { type: Type.STRING } },
+    componentBreakdown: { type: Type.ARRAY, items: { type: Type.STRING } },
+    dataControlFlow: { type: Type.ARRAY, items: { type: Type.STRING } },
+    codeQualityRisks: { type: Type.ARRAY, items: { type: Type.STRING } },
+    improvementSuggestions: { type: Type.ARRAY, items: { type: Type.STRING } },
+    metaAnalysis: {
+      type: Type.OBJECT,
+      properties: {
+        qualityScore: { type: Type.NUMBER },
+        complexity: { type: Type.STRING },
+        maintainability: { type: Type.STRING }
+      },
+      required: ["qualityScore", "complexity", "maintainability"]
+    },
+    architectureDiagram: { type: Type.STRING }
+  },
+  required: ["projectOverview", "architectureSummary", "componentBreakdown", "dataControlFlow", "codeQualityRisks", "improvementSuggestions", "metaAnalysis", "architectureDiagram"]
 };
 
 export default async function handler(request: Request) {
@@ -24,19 +48,13 @@ export default async function handler(request: Request) {
     }
 
     const ai = new GoogleGenAI({ apiKey });
-    
-    // Optimizations for Speed vs Depth:
-    // Standard: Gemini 3 Flash (Fast)
-    // Deep Reasoning: Gemini 3 Pro (High Intelligence, Slower)
     const modelName = deepReasoning ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
-    
-    // Configure Thinking Budget
-    // Flash: Explicitly set to 0 to disable thinking and ensure fast time-to-first-token.
-    // Pro: 8192 for deep analysis.
     const thinkingBudget = deepReasoning ? 8192 : 0;
 
     const genAIConfig: any = {
       systemInstruction: systemInstruction,
+      responseMimeType: 'application/json',
+      responseSchema: analysisSchema,
       thinkingConfig: { thinkingBudget }
     };
 
@@ -58,9 +76,6 @@ export default async function handler(request: Request) {
           controller.close();
         } catch (error: any) {
           console.error("Streaming Error:", error);
-          // If we haven't sent any data yet, we might be able to send a JSON error,
-          // but since we are in a stream, it's safer to just close or log.
-          // In a real app, we might send a specific error string chunk.
           controller.error(error);
         }
       },

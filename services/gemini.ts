@@ -4,7 +4,11 @@ import { AnalysisSection, RepoAnalysis, SectionContent, FileData, MetaAnalysisDa
 const BASE_SYSTEM_INSTRUCTION = `
 You are RepoSense, a professional code intelligence engine. 
 Your task is to analyze the provided GitHub repository context and generate a deep, system-level technical report in structured JSON format.
-Do not use Markdown formatting in the JSON values. Keep strings clean and concise.
+CRITICAL FORMATTING RULES:
+1. Return ONLY valid JSON.
+2. Do NOT use Markdown formatting (no **bold**, no *italics*, no \`code\`) inside the JSON string values.
+3. Keep text clean, professional, and concise.
+4. For the 'architectureDiagram', provide ONLY the ASCII art, no surrounding markdown code blocks.
 `;
 
 // Schema definition for the JSON output
@@ -14,32 +18,32 @@ const analysisSchema: Schema = {
     projectOverview: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "List of 3-5 items: Purpose, Target Users, Core Problem Solved."
+      description: "List of 3-5 items: Purpose, Target Users, Core Problem Solved. Plain text only."
     },
     architectureSummary: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "List of 3-5 items: Arch style, Major modules, Design decisions."
+      description: "List of 3-5 items: Arch style, Major modules, Design decisions. Plain text only."
     },
     componentBreakdown: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "List of key components. Format each string as: 'Name: [Name] | Responsibility: [Resp] | Key Logic: [Logic]'"
+      description: "List of key components. Format: 'Name | Responsibility | Logic'. Plain text only."
     },
     dataControlFlow: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "List of 3-5 items: Entry points, Data flow, Dependencies."
+      description: "List of 3-5 items: Entry points, Data flow, Dependencies. Plain text only."
     },
     codeQualityRisks: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "List of 3-5 items: Bugs, Security risks, Scalability."
+      description: "List of 3-5 items: Bugs, Security risks, Scalability. Plain text only."
     },
     improvementSuggestions: {
       type: Type.ARRAY,
       items: { type: Type.STRING },
-      description: "List of 3-5 items: Short/Medium/Long term fixes."
+      description: "List of 3-5 items: Short/Medium/Long term fixes. Plain text only."
     },
     metaAnalysis: {
       type: Type.OBJECT,
@@ -52,7 +56,7 @@ const analysisSchema: Schema = {
     },
     architectureDiagram: {
       type: Type.STRING,
-      description: "A detailed ASCII art diagram of the system architecture."
+      description: "A detailed ASCII art diagram of the system architecture. Plain text."
     }
   },
   required: ["projectOverview", "architectureSummary", "componentBreakdown", "dataControlFlow", "codeQualityRisks", "improvementSuggestions", "metaAnalysis", "architectureDiagram"]
@@ -62,6 +66,7 @@ export const analyzeRepo = async (
   repoName: string,
   fileTree: string[],
   files: FileData[],
+  userApiKey: string,
   mode: AnalysisMode = 'full',
   deepReasoning: boolean = false,
   isFallback: boolean = false,
@@ -110,12 +115,14 @@ ${contextSection}
 `;
 
   // 3. Initialize Client & Call API
-  const apiKey = process.env.API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please check your configuration.");
+  // Strict BYOK: No fallback to process.env.API_KEY
+  const finalApiKey = userApiKey;
+  
+  if (!finalApiKey) {
+    throw new Error("Gemini API Key is missing. Please add it in Settings.");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
+  const ai = new GoogleGenAI({ apiKey: finalApiKey });
   
   // Model Selection
   const modelName = deepReasoning ? 'gemini-3-pro-preview' : 'gemini-3-flash-preview';
@@ -141,8 +148,6 @@ ${contextSection}
       const text = chunk.text;
       if (text) {
         accumulatedText += text;
-        // Optional: Attempt to parse partial JSON for progress (advanced)
-        // For now, we just accumulate. The UI will show "Generating..." based on state.status
       }
     }
 
@@ -150,6 +155,7 @@ ${contextSection}
     let cleanJsonStr = accumulatedText.trim();
     // Remove markdown code blocks if present (sometimes model adds them despite config)
     cleanJsonStr = cleanJsonStr.replace(/^```json/, '').replace(/```$/, '');
+    cleanJsonStr = cleanJsonStr.replace(/^```/, '').replace(/```$/, '');
 
     let parsedData: any;
     try {
@@ -167,15 +173,29 @@ ${contextSection}
     console.error("Gemini Analysis Failed:", error);
     let msg = error.message || "An error occurred during analysis.";
     if (msg.includes('429')) msg = "Too many requests. Please wait a moment.";
+    if (msg.includes('API key not valid')) msg = "Invalid Gemini API Key. Please check your settings.";
     if (msg.includes('500') || msg.includes('503')) msg = "Gemini API is temporarily unavailable.";
     throw new Error(msg);
   }
 };
 
+// Helper to remove markdown artifacts like **bold**, *italic*, or `code`
+const cleanText = (text: string): string => {
+  if (!text) return "";
+  return text
+    .replace(/\*\*(.*?)\*\*/g, '$1') // Remove bold
+    .replace(/\*(.*?)\*/g, '$1')     // Remove italic
+    .replace(/`(.*?)`/g, '$1')       // Remove inline code
+    .replace(/^[-*•]\s+/, '')        // Remove leading bullets
+    .trim();
+};
+
 const transformJsonToAnalysis = (data: any): RepoAnalysis => {
-  // Helper to ensure array of strings
+  // Helper to ensure array of strings and clean them
   const getList = (items: any): string[] => {
-    if (Array.isArray(items)) return items.map(String);
+    if (Array.isArray(items)) {
+      return items.map(String).map(cleanText);
+    }
     return [];
   };
 
@@ -188,10 +208,10 @@ const transformJsonToAnalysis = (data: any): RepoAnalysis => {
     improvementSuggestions: { title: AnalysisSection.Improvements, items: getList(data.improvementSuggestions) },
     metaAnalysis: {
       qualityScore: Number(data.metaAnalysis?.qualityScore) || 5,
-      complexity: (data.metaAnalysis?.complexity as any) || 'Intermediate',
-      maintainability: (data.metaAnalysis?.maintainability as any) || 'Medium'
+      complexity: cleanText((data.metaAnalysis?.complexity as any) || 'Intermediate') as any,
+      maintainability: cleanText((data.metaAnalysis?.maintainability as any) || 'Medium') as any
     },
-    architectureDiagram: data.architectureDiagram || ''
+    // For diagram, we just want to strip outer code blocks, but preserve internal structure
+    architectureDiagram: (data.architectureDiagram || '').replace(/^```(\w+)?/, '').replace(/```$/, '').trim()
   };
 };
-

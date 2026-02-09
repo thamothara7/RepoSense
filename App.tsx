@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { GithubIcon, SearchIcon, Activity, AlertTriangle, Layers, Zap, Cpu, Shield, Layout, RepoSenseLogo, Sun, Moon, Settings, Key, X, Check, FileCode } from './components/Icons';
+import { GithubIcon, SearchIcon, Activity, AlertTriangle, Layers, Zap, Cpu, Shield, Layout, RepoSenseLogo, Sun, Moon, Settings, Key, X, Check, FileCode, XIcon, LinkedInIcon, CoffeeIcon } from './components/Icons';
 import { SectionCard } from './components/SectionCard';
 import { ArchitectureView } from './components/ArchitectureView';
 import { MetaStats } from './components/MetaStats';
@@ -42,6 +42,7 @@ const App: React.FC = () => {
   // Settings & Token
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [githubToken, setGithubToken] = useState('');
+  const [geminiApiKey, setGeminiApiKey] = useState('');
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -51,16 +52,19 @@ const App: React.FC = () => {
   }, [theme]);
 
   useEffect(() => {
-    const storedToken = localStorage.getItem('github_token');
-    if (storedToken) setGithubToken(storedToken);
+    const storedGhToken = localStorage.getItem('github_token');
+    const storedGeminiKey = localStorage.getItem('gemini_api_key');
+    if (storedGhToken) setGithubToken(storedGhToken);
+    if (storedGeminiKey) setGeminiApiKey(storedGeminiKey);
   }, []);
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
   };
 
-  const handleSaveToken = () => {
+  const handleSaveSettings = () => {
     localStorage.setItem('github_token', githubToken);
+    localStorage.setItem('gemini_api_key', geminiApiKey);
     setIsSettingsOpen(false);
   };
 
@@ -68,6 +72,15 @@ const App: React.FC = () => {
     e.preventDefault();
     const targetUrl = overrideUrl || url;
     
+    // Strict BYOK: Only use the key from state (loaded from local storage)
+    const hasKey = !!geminiApiKey;
+
+    if (!hasKey) {
+        setIsSettingsOpen(true);
+        setState({ status: 'error', message: 'Gemini API Key is required. Please add it in Settings.' });
+        return;
+    }
+
     if (!targetUrl.trim()) {
       setState({ status: 'error', message: 'Please enter a GitHub repository URL.' });
       return;
@@ -106,7 +119,8 @@ const App: React.FC = () => {
       const analysis = await analyzeRepo(
         repoInfo.repo, 
         context.fileTree, 
-        context.files, 
+        context.files,
+        geminiApiKey,
         mode, 
         deepReasoning,
         context.isFallback,
@@ -157,13 +171,20 @@ const App: React.FC = () => {
   const showLoading = (state.status === 'fetching' || (state.status === 'analyzing' && !state.data));
 
   return (
-    <div className="min-h-screen selection:bg-indigo-500/30 font-sans relative">
+    <div className="min-h-screen selection:bg-indigo-500/30 font-sans relative overflow-x-hidden flex flex-col">
+      
+      {/* --- LIQUID BACKGROUND --- */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10">
+        <div className="absolute top-0 left-1/4 w-[500px] h-[500px] bg-indigo-500/20 dark:bg-indigo-500/10 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-70 animate-blob"></div>
+        <div className="absolute top-0 right-1/4 w-[500px] h-[500px] bg-purple-500/20 dark:bg-purple-500/10 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-70 animate-blob animation-delay-2000"></div>
+        <div className="absolute -bottom-32 left-1/3 w-[500px] h-[500px] bg-cyan-500/20 dark:bg-cyan-500/10 rounded-full mix-blend-multiply dark:mix-blend-screen filter blur-3xl opacity-70 animate-blob animation-delay-4000"></div>
+      </div>
       
       {/* Settings Modal */}
       {isSettingsOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden animate-fade-in-up">
-            <div className="flex items-center justify-between p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-fade-in">
+          <div className="glass-panel w-full max-w-md rounded-2xl overflow-hidden animate-fade-in-up">
+            <div className="flex items-center justify-between p-4 border-b border-white/10 bg-white/10 dark:bg-black/20">
               <h3 className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-2">
                 <Settings className="w-4 h-4" />
                 Configuration
@@ -172,10 +193,12 @@ const App: React.FC = () => {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-6">
-              <div className="mb-4">
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
-                  GitHub Personal Access Token
+            <div className="p-6 space-y-5">
+              
+              {/* Gemini API Key */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400 mb-2 flex items-center gap-2">
+                   Gemini API Key <span className="text-[10px] bg-indigo-100 dark:bg-indigo-900/50 px-1.5 py-0.5 rounded text-indigo-700 dark:text-indigo-300">Required</span>
                 </label>
                 <div className="relative">
                   <div className="absolute left-3 top-2.5 text-slate-400">
@@ -183,22 +206,50 @@ const App: React.FC = () => {
                   </div>
                   <input 
                     type="password"
-                    value={githubToken}
-                    onChange={(e) => setGithubToken(e.target.value)}
-                    placeholder="ghp_..."
-                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-700 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-800 dark:text-slate-200 text-sm font-mono"
+                    value={geminiApiKey}
+                    onChange={(e) => setGeminiApiKey(e.target.value)}
+                    placeholder="AIza..."
+                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-slate-50/50 dark:bg-black/30 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-800 dark:text-slate-200 text-sm font-mono placeholder-slate-400"
                   />
                 </div>
                 <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
-                  Adding a token increases your rate limit from 60 to 5,000 req/hr.
-                  <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline ml-1">
-                    Generate a classic token
-                  </a> (select 'repo' scope).
+                  Your key is stored locally in your browser. 
+                  <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline ml-1 font-medium">
+                    Get a Gemini API Key here.
+                  </a>
                 </p>
               </div>
+
+              <div className="w-full h-px bg-slate-200/50 dark:bg-white/10"></div>
+
+              {/* GitHub Token */}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2">
+                  GitHub Personal Access Token <span className="text-[10px] font-normal normal-case opacity-70">(Optional)</span>
+                </label>
+                <div className="relative">
+                  <div className="absolute left-3 top-2.5 text-slate-400">
+                    <GithubIcon className="w-4 h-4" />
+                  </div>
+                  <input 
+                    type="password"
+                    value={githubToken}
+                    onChange={(e) => setGithubToken(e.target.value)}
+                    placeholder="ghp_..."
+                    className="w-full pl-10 pr-4 py-2 rounded-lg bg-slate-50/50 dark:bg-black/30 border border-slate-200 dark:border-white/10 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 text-slate-800 dark:text-slate-200 text-sm font-mono placeholder-slate-400"
+                  />
+                </div>
+                <p className="mt-2 text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Increases rate limit from 60 to 5,000 req/hr.
+                  <a href="https://github.com/settings/tokens" target="_blank" rel="noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:underline ml-1">
+                    Generate a classic token
+                  </a>.
+                </p>
+              </div>
+
               <button 
-                onClick={handleSaveToken}
-                className="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-indigo-500/20"
+                onClick={handleSaveSettings}
+                className="w-full py-2.5 mt-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-medium transition-colors shadow-lg shadow-indigo-500/20"
               >
                 Save Configuration
               </button>
@@ -207,13 +258,13 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* Header */}
-      <header className="border-b border-slate-200 dark:border-white/5 bg-white/70 dark:bg-[#0a0f1e]/80 backdrop-blur-md sticky top-0 z-50 transition-colors duration-300">
+      {/* Header - Glass */}
+      <header className="glass sticky top-0 z-50 transition-colors duration-300">
         <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
           
-          <div className="flex items-center gap-3 group cursor-default">
+          <div className="flex items-center gap-3 group cursor-default flex-shrink-0">
             <div className="relative flex items-center justify-center">
-               <RepoSenseLogo className="w-8 h-8 group-hover:scale-105 transition-transform duration-300 ease-out" />
+               <RepoSenseLogo className="w-8 h-8 group-hover:scale-105 transition-transform duration-300 ease-out drop-shadow-lg" />
             </div>
             <h1 className="text-lg font-bold text-slate-800 dark:text-slate-100 font-mono tracking-tight leading-none pt-0.5">
               RepoSense
@@ -224,26 +275,29 @@ const App: React.FC = () => {
             <Tooltip content="Settings & API Keys">
               <button 
                 onClick={() => setIsSettingsOpen(true)}
-                className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-white bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/80 transition-all duration-200"
+                className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-white bg-slate-100/50 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 transition-all duration-200 relative border border-transparent hover:border-white/10 hover:scale-110 active:scale-95"
                 aria-label="Settings"
               >
                 <Settings className="w-4 h-4" />
+                {!geminiApiKey && (
+                   <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white dark:border-slate-900 shadow-sm"></span>
+                )}
               </button>
             </Tooltip>
 
             <Tooltip content={theme === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}>
               <button 
                 onClick={toggleTheme}
-                className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-white bg-slate-100 dark:bg-slate-800/50 hover:bg-slate-200 dark:hover:bg-slate-700/80 transition-all duration-200"
+                className="p-2 rounded-lg text-slate-500 hover:text-indigo-600 dark:text-slate-400 dark:hover:text-white bg-slate-100/50 dark:bg-white/5 hover:bg-slate-200 dark:hover:bg-white/10 transition-all duration-200 border border-transparent hover:border-white/10 hover:scale-110 active:scale-95"
                 aria-label="Toggle theme"
               >
                 {theme === 'dark' ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
               </button>
             </Tooltip>
 
-            <div className="w-px h-6 bg-slate-200 dark:bg-slate-800 hidden md:block"></div>
+            <div className="w-px h-6 bg-slate-200 dark:bg-white/10 hidden md:block"></div>
 
-            <div className="text-xs font-mono text-slate-500 dark:text-slate-500 hidden md:block">
+            <div className="text-xs font-mono text-slate-500 dark:text-slate-500 hidden md:block whitespace-nowrap">
               POWERED BY GEMINI 3
             </div>
             
@@ -252,7 +306,7 @@ const App: React.FC = () => {
                 href="https://github.com/thamothara7/RepoSense" 
                 target="_blank" 
                 rel="noopener noreferrer"
-                className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors duration-200 group relative block"
+                className="text-slate-400 hover:text-slate-900 dark:hover:text-white transition-colors duration-200 group relative block hover:scale-110 active:scale-95 transform"
               >
                 <GithubIcon className="w-5 h-5" />
               </a>
@@ -261,16 +315,16 @@ const App: React.FC = () => {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-6 py-12 md:py-20">
+      <main className="max-w-7xl mx-auto px-6 py-12 md:py-20 relative z-0 flex-grow w-full">
         
         {/* Hero / Input */}
         <div className="max-w-3xl mx-auto text-center mb-16">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-500/20 text-indigo-700 dark:text-indigo-300 text-xs font-mono mb-6 shadow-sm">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full glass bg-indigo-50/50 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300 text-xs font-mono mb-6 shadow-sm">
             <Zap className="w-3 h-3" />
             <span>Next-Gen System Intelligence</span>
           </div>
           
-          <h2 className="text-4xl md:text-5xl lg:text-6xl font-extrabold mb-6 tracking-tight text-slate-900 dark:text-white leading-tight">
+          <h2 className="text-4xl md:text-5xl lg:text-6xl font-extrabold mb-6 tracking-tight text-slate-900 dark:text-white leading-tight drop-shadow-sm">
             Instant Codebase <br/> 
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 via-blue-600 to-cyan-500 dark:from-indigo-400 dark:via-blue-400 dark:to-cyan-400">
               Intelligence
@@ -280,19 +334,19 @@ const App: React.FC = () => {
             Understand complex GitHub repositories in seconds. Deep system analysis, architecture visualization, and risk assessment powered by AI.
           </p>
 
-          <form onSubmit={(e) => handleAnalyze(e)} className="relative w-full max-w-2xl mx-auto mb-10 group">
-            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur opacity-20 dark:opacity-30 group-hover:opacity-40 dark:group-hover:opacity-60 transition duration-500"></div>
+          <form onSubmit={(e) => handleAnalyze(e)} className="relative w-full max-w-2xl mx-auto mb-10 group z-10">
+            <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
             
-            <div className="relative flex items-center bg-white dark:bg-[#0f1629] rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl shadow-indigo-500/5 focus-within:border-indigo-500/50 focus-within:ring-4 focus-within:ring-indigo-500/10 transition-all duration-300 overflow-hidden h-16">
+            <div className="relative flex items-center glass-panel rounded-2xl transition-all duration-300 overflow-hidden h-16">
               
-              <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-500 transition-colors group-focus-within:text-indigo-500">
+              <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-400 transition-colors group-focus-within:text-indigo-500">
                 <GithubIcon className="w-5 h-5" />
               </div>
 
               <input
                 type="text"
                 placeholder="https://github.com/owner/repository"
-                className="flex-1 bg-transparent border-none outline-none focus:ring-0 px-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm h-full w-full"
+                className="flex-1 bg-transparent border-none outline-none focus:ring-0 px-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm h-full w-full min-w-0"
                 value={url}
                 onChange={(e) => setUrl(e.target.value)}
                 disabled={state.status === 'fetching' || state.status === 'analyzing'}
@@ -303,7 +357,7 @@ const App: React.FC = () => {
                 <button
                   type="submit"
                   disabled={state.status === 'fetching' || state.status === 'analyzing'}
-                  className="h-11 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 whitespace-nowrap flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
+                  className="h-11 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 whitespace-nowrap flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 border border-indigo-400/20"
                 >
                   {state.status === 'fetching' ? (
                     <Activity className="animate-spin w-4 h-4" />
@@ -324,13 +378,13 @@ const App: React.FC = () => {
           </form>
 
           <div className="flex flex-col items-center space-y-8">
-            <div className="flex flex-col md:flex-row items-center justify-center gap-4 text-sm bg-slate-100 dark:bg-slate-900/50 p-2 rounded-2xl border border-slate-200 dark:border-white/5">
-              <div className="flex bg-white dark:bg-slate-800/50 rounded-xl p-1 border border-slate-200 dark:border-transparent shadow-sm dark:shadow-none">
+            <div className="flex flex-col md:flex-row items-center justify-center gap-4 text-sm glass p-2 rounded-2xl">
+              <div className="flex bg-slate-100 dark:bg-black/20 rounded-xl p-1 shadow-inner">
                 <Tooltip content="Comprehensive system analysis">
                   <button
                     type="button"
                     onClick={() => setMode('full')}
-                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${mode === 'full' ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${mode === 'full' ? 'bg-white dark:bg-slate-700/80 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'}`}
                   >
                     <Layers className="w-3.5 h-3.5" /> Full
                   </button>
@@ -339,7 +393,7 @@ const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setMode('architecture')}
-                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${mode === 'architecture' ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${mode === 'architecture' ? 'bg-white dark:bg-slate-700/80 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'}`}
                   >
                     <Layout className="w-3.5 h-3.5" /> Architecture
                   </button>
@@ -348,7 +402,7 @@ const App: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setMode('risks')}
-                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${mode === 'risks' ? 'bg-slate-800 text-white shadow-sm dark:bg-slate-700' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'}`}
+                    className={`px-4 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 ${mode === 'risks' ? 'bg-white dark:bg-slate-700/80 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'}`}
                   >
                     <Shield className="w-3.5 h-3.5" /> Risks
                   </button>
@@ -361,7 +415,7 @@ const App: React.FC = () => {
                 <button 
                   type="button"
                   onClick={() => setDeepReasoning(!deepReasoning)}
-                  className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all duration-200 ${deepReasoning ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-500/50 text-indigo-700 dark:text-indigo-200' : 'bg-transparent border-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-800/50'}`}
+                  className={`flex items-center gap-3 px-4 py-2 rounded-xl border transition-all duration-200 ${deepReasoning ? 'bg-indigo-50/50 dark:bg-indigo-900/30 border-indigo-200/50 dark:border-indigo-500/30 text-indigo-700 dark:text-indigo-200' : 'bg-transparent border-transparent text-slate-500 dark:text-slate-400 hover:bg-slate-100/50 dark:hover:bg-white/5'}`}
                 >
                   <Cpu className={`w-4 h-4 ${deepReasoning ? 'text-indigo-600 dark:text-indigo-400' : 'text-slate-400 dark:text-slate-500'}`} />
                   <span className="font-medium">Deep Reasoning</span>
@@ -379,8 +433,7 @@ const App: React.FC = () => {
                   key={repo}
                   onClick={() => handleExampleClick(repo)}
                   className="group relative text-xs font-mono px-3 py-1.5 rounded-md border transition-all duration-300
-                    bg-white dark:bg-slate-800/80 
-                    border-slate-200 dark:border-slate-700
+                    glass-panel
                     text-slate-600 dark:text-slate-400
                     hover:border-indigo-300 dark:hover:border-indigo-500/30
                     hover:text-indigo-600 dark:hover:text-indigo-200
@@ -397,7 +450,7 @@ const App: React.FC = () => {
           </div>
 
           {state.status === 'error' && (
-            <div className="mt-8 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-500/20 rounded-lg text-red-600 dark:text-red-200 text-sm flex items-center justify-center gap-2 animate-pulse">
+            <div className="mt-8 p-4 glass-panel border-red-500/30 bg-red-50/50 dark:bg-red-900/20 rounded-lg text-red-600 dark:text-red-200 text-sm flex items-center justify-center gap-2 animate-pulse">
               <AlertTriangle className="w-4 h-4" />
               {state.message}
             </div>
@@ -407,25 +460,31 @@ const App: React.FC = () => {
         {/* LOADING STEPS INDICATOR */}
         {showLoading && (
            <div className="max-w-2xl mx-auto mt-16">
-              <div className="bg-white dark:bg-[#0f1629] border border-slate-200 dark:border-slate-800 rounded-xl p-6 shadow-2xl relative overflow-hidden">
-                {/* Background Grid */}
-                <div className="absolute inset-0 bg-grid-slate-100 dark:bg-grid-slate-800/[0.2] [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] dark:[mask-image:linear-gradient(0deg,rgba(255,255,255,0.1),rgba(255,255,255,0.5))] pointer-events-none" />
-                
+              <div className="glass-panel rounded-xl p-6 relative overflow-hidden">
                 <h3 className="text-center font-mono font-bold text-slate-800 dark:text-white mb-6 tracking-wide relative z-10">SYSTEM ANALYSIS IN PROGRESS</h3>
                 
+                {/* Visual Progress Bar */}
+                <div className="relative h-2 w-full bg-slate-200 dark:bg-slate-700 rounded-full mb-8 overflow-hidden z-10">
+                  <div 
+                    className="absolute top-0 left-0 h-full bg-gradient-to-r from-indigo-500 via-purple-500 to-indigo-500 transition-all duration-700 ease-out rounded-full"
+                    style={{ width: `${Math.min((currentStep / LOADING_STEPS.length) * 100, 100)}%` }}
+                  >
+                     <div className="absolute inset-0 bg-white/30 animate-shimmer"></div>
+                  </div>
+                </div>
+
                 <div className="space-y-4 relative z-10">
                   {LOADING_STEPS.map((step, idx) => {
                     const stepNum = idx + 1;
                     const isActive = currentStep === stepNum;
                     const isCompleted = currentStep > stepNum;
-                    const isPending = currentStep < stepNum;
 
                     return (
-                      <div key={step.id} className={`flex items-center gap-4 p-3 rounded-lg transition-all duration-300 ${isActive ? 'bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/30' : 'border border-transparent'}`}>
+                      <div key={step.id} className={`flex items-center gap-4 p-3 rounded-lg transition-all duration-300 ${isActive ? 'bg-indigo-50/50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-500/30' : 'border border-transparent'}`}>
                         <div className={`w-8 h-8 rounded-full flex items-center justify-center flex-shrink-0 transition-colors duration-300 ${
                           isCompleted ? 'bg-emerald-500 text-white' : 
                           isActive ? 'bg-indigo-600 text-white' : 
-                          'bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-600'
+                          'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-400'
                         }`}>
                            {isCompleted ? <Check className="w-4 h-4" /> : 
                             isActive ? <step.icon className="w-4 h-4 animate-pulse" /> : 
@@ -433,25 +492,19 @@ const App: React.FC = () => {
                         </div>
                         <div className="flex-1 min-w-0">
                           <div className="flex justify-between items-center mb-0.5">
-                            <span className={`font-medium text-sm ${isActive || isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-600'}`}>
+                            <span className={`font-medium text-sm ${isActive || isCompleted ? 'text-slate-800 dark:text-slate-200' : 'text-slate-400 dark:text-slate-500'}`}>
                               {step.label}
                             </span>
                             {isActive && <span className="text-xs text-indigo-500 font-mono animate-pulse">Processing...</span>}
                             {isCompleted && <span className="text-xs text-emerald-500 font-mono">Done</span>}
                           </div>
-                          {/* Progress bar for active step */}
-                          {isActive && (
-                            <div className="h-1 w-full bg-indigo-100 dark:bg-indigo-900/50 rounded-full overflow-hidden mt-1.5">
-                              <div className="h-full bg-indigo-500 animate-progress-indeterminate rounded-full"></div>
-                            </div>
-                          )}
                         </div>
                       </div>
                     )
                   })}
                 </div>
 
-                <div className="mt-6 pt-4 border-t border-slate-100 dark:border-slate-800 flex justify-center text-xs text-slate-500 dark:text-slate-500 font-mono">
+                <div className="mt-6 pt-4 border-t border-slate-200 dark:border-white/10 flex justify-center text-xs text-slate-500 dark:text-slate-500 font-mono">
                   {state.message}
                 </div>
               </div>
@@ -464,14 +517,14 @@ const App: React.FC = () => {
             
             {/* Status Bar for Streaming */}
             {state.status === 'analyzing' && (
-               <div className="mb-8 w-full bg-slate-100 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden relative">
+               <div className="mb-8 w-full bg-slate-200 dark:bg-slate-800 rounded-full h-1.5 overflow-hidden relative">
                   <div className="absolute top-0 left-0 h-full bg-gradient-to-r from-indigo-500 to-cyan-400 w-full animate-progress-indeterminate origin-left"></div>
                </div>
             )}
 
             {/* Rate Limit Banner */}
             {state.data.isFallback && (
-              <div className="mb-8 p-4 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-500/30 rounded-lg flex items-start gap-3 shadow-sm">
+              <div className="mb-8 p-4 glass-panel border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/30 rounded-lg flex items-start gap-3">
                 <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                 <div className="flex-1">
                   <h3 className="text-sm font-bold text-amber-800 dark:text-amber-200 mb-1">
@@ -550,6 +603,67 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Footer */}
+      <footer className="w-full glass py-8 border-t border-white/10 mt-auto relative z-10">
+        <div className="max-w-7xl mx-auto px-6 flex flex-col items-center">
+          <div className="flex flex-wrap items-center justify-center gap-6 mb-4">
+             {/* GitHub */}
+             <Tooltip content="GitHub">
+                <a 
+                  href="https://github.com/thamothara7" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors p-2 hover:bg-slate-200/50 dark:hover:bg-white/10 rounded-full"
+                >
+                  <GithubIcon className="w-5 h-5" />
+                </a>
+             </Tooltip>
+
+             {/* X (Twitter) */}
+             <Tooltip content="X (Twitter)">
+                <a 
+                  href="https://x.com/ThamotharaNata1" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors p-2 hover:bg-slate-200/50 dark:hover:bg-white/10 rounded-full"
+                >
+                  <XIcon className="w-5 h-5" />
+                </a>
+             </Tooltip>
+
+             {/* LinkedIn */}
+             <Tooltip content="LinkedIn">
+                <a 
+                  href="https://www.linkedin.com/in/thamotharanatarajan/" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 transition-colors p-2 hover:bg-slate-200/50 dark:hover:bg-white/10 rounded-full"
+                >
+                  <LinkedInIcon className="w-5 h-5" />
+                </a>
+             </Tooltip>
+
+             {/* Buy Me A Coffee */}
+             <Tooltip content="Buy Me A Coffee">
+                <a 
+                  href="https://buymeacoffee.com/thamothara7" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="text-slate-500 hover:text-yellow-500 dark:text-slate-400 dark:hover:text-yellow-400 transition-colors p-2 hover:bg-slate-200/50 dark:hover:bg-white/10 rounded-full"
+                >
+                  <CoffeeIcon className="w-5 h-5" />
+                </a>
+             </Tooltip>
+          </div>
+          
+          <div className="text-center">
+            <p className="text-xs text-slate-400 dark:text-slate-500 font-mono">
+              Designed & Built by Thamothara
+            </p>
+          </div>
+        </div>
+      </footer>
       
       <style>{`
         @keyframes progress-indeterminate {
