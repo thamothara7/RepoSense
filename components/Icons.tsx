@@ -3,6 +3,16 @@ import React from 'react';
 // Using simple SVG icons to avoid external dependency issues in the prompt constraints
 // In a real project, I would use lucide-react
 
+export const RepoSenseLogo = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path d="M15 5h4a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-4" />
+    <path d="M9 19H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h4" />
+    <rect x="9" y="9" width="6" height="6" rx="1.5" />
+    <path d="M12 9V7" />
+    <path d="M12 17v-2" />
+  </svg>
+);
+
 export const SearchIcon = ({ className }: { className?: string }) => (
   <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
     <circle cx="11" cy="11" r="8"></circle>
