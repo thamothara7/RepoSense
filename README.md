@@ -12,11 +12,21 @@
 
 ---
 
+## 🔑 Getting the Gemini API Key
+
+1.  **Go to Google AI Studio**: Visit [https://aistudio.google.com/app/apikey](https://aistudio.google.com/app/apikey).
+2.  **Sign in**: Use your Google account.
+3.  **Create Key**: Click the blue **"Create API key"** button.
+    *   You can create a key in a new project (recommended) or an existing Google Cloud project.
+4.  **Copy**: Copy the generated API Key string (it starts with `AIza...`).
+
+---
+
 ## 🛠️ Prerequisites
 
 *   **Node.js** (v18 or higher)
 *   **npm** or **yarn**
-*   **Google Gemini API Key**: You need a paid or free tier API key from [Google AI Studio](https://aistudio.google.com/).
+*   **Google Gemini API Key**: Follow the steps above to obtain one.
 
 ---
 
@@ -44,19 +54,21 @@
 
 ## 🏃 Running Locally
 
-To start the development server:
+Because this project uses Serverless Functions (`api/analyze.ts`) to secure your API key, you must use the **Vercel CLI** to run it locally. The standard `npm run dev` will only load the frontend and API calls will fail.
 
-```bash
-npm run dev
-```
+1.  **Start the development environment:**
+    ```bash
+    npx vercel dev
+    ```
+    *(If prompted, follow the instructions to link to a Vercel project. You can choose "No" to existing project to set up a new one).*
 
-Open your browser and navigate to `http://localhost:5173`.
+2.  Open your browser to the URL provided (usually `http://localhost:3000`).
 
 ---
 
 ## 🚢 Deployment (Vercel)
 
-This project is optimized for deployment on Vercel.
+This project is optimized for deployment on Vercel using **Serverless Functions** to keep your API key secure.
 
 1.  **Push to GitHub**: Ensure your code is pushed to a GitHub repository.
 2.  **Import to Vercel**:
@@ -66,21 +78,18 @@ This project is optimized for deployment on Vercel.
 3.  **Configure Environment Variables**:
     *   In the "Environment Variables" section of the Vercel deployment screen:
     *   **Key**: `API_KEY`
-    *   **Value**: `your_actual_google_gemini_key`
+    *   **Value**: Paste your key starting with `AIza...`
     *   Click **Add**.
 4.  **Deploy**: Click "Deploy".
 
-### ⚠️ Important Note on API Keys
-Since this is a client-side application, the API Key is embedded in the frontend build. 
-*   **For Personal/Demo Use**: This is acceptable if you trust your users or restrict access.
-*   **For Production**: It is recommended to move the API call to a backend proxy (e.g., Vercel Serverless Functions) to keep your API key hidden from the browser.
+> **Security Note**: RepoSense uses a Vercel Serverless Function (`api/analyze.ts`) to proxy requests to Google. Your API Key is **never** exposed to the browser client.
 
 ---
 
 ## 🐛 Troubleshooting
 
 ### "API Key is missing"
-*   **Locally**: Ensure you have a `.env` file in the root with `API_KEY=...`. Restart the dev server (`npm run dev`) after creating it.
+*   **Locally**: Ensure you have a `.env` file in the root with `API_KEY=...`. Restart the server (`npx vercel dev`) after creating it.
 *   **Vercel**: Go to Project Settings -> Environment Variables and ensure `API_KEY` is set. You must redeploy (Deployment -> Redeploy) after adding the key.
 
 ### "Gemini API rate limit exceeded"
@@ -88,9 +97,9 @@ Since this is a client-side application, the API Key is embedded in the frontend
 *   If you continue to see this error, wait 1-2 minutes and try again.
 *   Consider upgrading to a paid tier in Google AI Studio if you need higher limits.
 
-### "Blue/Blank Screen on Load"
-*   Open the browser Developer Tools (F12) -> Console.
-*   If you see "React is not defined" or version mismatch errors, ensure you are not using conflicting `importmap` scripts in `index.html`. The standard `vite build` handles React bundling.
+### "Analysis timed out"
+*   Vercel Serverless Functions have a 10-second timeout on the Hobby (free) plan.
+*   If analyzing a large repo with "Deep Reasoning" enabled, it may hit this limit. Try disabling "Deep Reasoning" or upgrading your Vercel plan to Pro (which allows up to 60s timeouts).
 
 ---
 
