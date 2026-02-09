@@ -1,10 +1,8 @@
 import { GoogleGenAI } from "@google/genai";
 import { AnalysisSection, RepoAnalysis, SectionContent, FileData, MetaAnalysisData, AnalysisMode } from '../types';
 
-const API_KEY = process.env.API_KEY || '';
-
 // Initialize GenAI
-const ai = new GoogleGenAI({ apiKey: API_KEY });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 const BASE_SYSTEM_INSTRUCTION = `
 You are RepoSense, a professional code intelligence engine. 
