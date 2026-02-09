@@ -1,0 +1,5 @@
+{
+  "name": "RepoSense",
+  "description": "A Gemini-powered code intelligence engine that analyzes GitHub repositories to provide structured, deep system-level insights.",
+  "requestFramePermissions": []
+}
