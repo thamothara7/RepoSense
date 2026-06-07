@@ -4,9 +4,10 @@ import { SectionCard } from './components/SectionCard';
 import { ArchitectureView } from './components/ArchitectureView';
 import { MetaStats } from './components/MetaStats';
 import { Tooltip } from './components/Tooltip';
-import { AnalysisState, AnalysisMode } from './types';
+import { AnalysisState, AnalysisMode, AppMode } from './types';
 import { parseRepoUrl, getRepoContext } from './services/github';
 import { analyzeRepo } from './services/gemini';
+import { CompareView } from './components/CompareView';
 
 const EXAMPLE_REPOS = [
   "facebook/react",
@@ -25,10 +26,13 @@ const LOADING_STEPS = [
 ];
 
 const App: React.FC = () => {
+  const [appMode, setAppMode] = useState<AppMode>('analyze');
   const [url, setUrl] = useState('');
+  const [urlB, setUrlB] = useState('');
   const [mode, setMode] = useState<AnalysisMode>('full');
   const [deepReasoning, setDeepReasoning] = useState(false);
   const [state, setState] = useState<AnalysisState>({ status: 'idle', message: '' });
+  const [stateB, setStateB] = useState<AnalysisState>({ status: 'idle', message: '' });
   const [currentStep, setCurrentStep] = useState(0);
   
   // Theme management
@@ -162,13 +166,85 @@ const App: React.FC = () => {
     }
   };
 
+  const runSingleAnalysis = async (
+    targetUrl: string,
+    setFn: React.Dispatch<React.SetStateAction<AnalysisState>>
+  ) => {
+    const repoInfo = parseRepoUrl(targetUrl);
+    if (!repoInfo) {
+      setFn({ status: 'error', message: `Invalid URL: ${targetUrl}` });
+      return;
+    }
+
+    setFn({ status: 'fetching', message: 'Scanning repository...' });
+
+    try {
+      const context = await getRepoContext(repoInfo.owner, repoInfo.repo, githubToken);
+      setFn({ status: 'analyzing', message: context.isFallback ? 'Using inferred analysis...' : 'Analyzing structure...' });
+
+      const analysis = await analyzeRepo(
+        repoInfo.repo,
+        context.fileTree,
+        context.files,
+        geminiApiKey,
+        mode,
+        deepReasoning,
+        context.isFallback,
+        (partialData) => setFn(prev => ({ ...prev, status: 'analyzing', message: 'Generating report...', data: partialData }))
+      );
+
+      setFn({ status: 'complete', message: 'Analysis complete.', data: analysis });
+    } catch (err: any) {
+      let msg = err.message || 'An unexpected error occurred.';
+      if (msg.includes('404')) msg = `Repository "${repoInfo.owner}/${repoInfo.repo}" not found.`;
+      if (msg.includes('Failed to fetch')) msg = 'Network error. Check your connection.';
+      setFn({ status: 'error', message: msg });
+    }
+  };
+
+  const handleCompare = async (e: React.FormEvent) => {
+    e.preventDefault();
+
+    if (!geminiApiKey) {
+      setIsSettingsOpen(true);
+      setState({ status: 'error', message: 'Gemini API Key is required.' });
+      return;
+    }
+    if (!url.trim() || !urlB.trim()) {
+      setState({ status: 'error', message: 'Please enter both repository URLs to compare.' });
+      return;
+    }
+
+    setState({ status: 'idle', message: '' });
+    setStateB({ status: 'idle', message: '' });
+    setCurrentStep(0);
+
+    await Promise.all([
+      runSingleAnalysis(url, setState),
+      runSingleAnalysis(urlB, setStateB),
+    ]);
+  };
+
   const handleExampleClick = (example: string) => {
     const fullUrl = `https://github.com/${example}`;
-    setUrl(fullUrl);
+    if (appMode === 'compare' && !url) {
+      setUrl(fullUrl);
+    } else if (appMode === 'compare' && !urlB) {
+      setUrlB(fullUrl);
+    } else {
+      setUrl(fullUrl);
+    }
   };
 
   const showResults = (state.status === 'complete' || state.status === 'analyzing') && state.data;
   const showLoading = (state.status === 'fetching' || (state.status === 'analyzing' && !state.data));
+  const showCompare = appMode === 'compare' && (
+    state.status !== 'idle' || stateB.status !== 'idle'
+  );
+  const isComparing = state.status === 'fetching' || state.status === 'analyzing' ||
+    stateB.status === 'fetching' || stateB.status === 'analyzing';
+  const compareRepo1Name = parseRepoUrl(url) ? `${parseRepoUrl(url)!.owner}/${parseRepoUrl(url)!.repo}` : url;
+  const compareRepo2Name = parseRepoUrl(urlB) ? `${parseRepoUrl(urlB)!.owner}/${parseRepoUrl(urlB)!.repo}` : urlB;
 
   return (
     <div className="min-h-screen selection:bg-indigo-500/30 font-sans relative overflow-x-hidden flex flex-col">
@@ -330,50 +406,124 @@ const App: React.FC = () => {
               Intelligence
             </span>
           </h2>
-          <p className="text-slate-600 dark:text-slate-400 mb-10 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
+          <p className="text-slate-600 dark:text-slate-400 mb-8 text-lg md:text-xl max-w-2xl mx-auto leading-relaxed">
             Understand complex GitHub repositories in seconds. Deep system analysis, architecture visualization, and risk assessment powered by AI.
           </p>
 
-          <form onSubmit={(e) => handleAnalyze(e)} className="relative w-full max-w-2xl mx-auto mb-10 group z-10">
+          {/* App Mode Toggle */}
+          <div className="flex justify-center mb-8">
+            <div className="flex bg-slate-100 dark:bg-black/20 rounded-xl p-1 shadow-inner">
+              <Tooltip content="Analyze a single repository">
+                <button
+                  type="button"
+                  onClick={() => { setAppMode('analyze'); setState({ status: 'idle', message: '' }); setStateB({ status: 'idle', message: '' }); }}
+                  className={`px-5 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 font-medium text-sm ${appMode === 'analyze' ? 'bg-white dark:bg-slate-700/80 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'}`}
+                >
+                  <SearchIcon className="w-3.5 h-3.5" /> Analyze
+                </button>
+              </Tooltip>
+              <Tooltip content="Compare two repositories side by side">
+                <button
+                  type="button"
+                  onClick={() => { setAppMode('compare'); setState({ status: 'idle', message: '' }); setStateB({ status: 'idle', message: '' }); }}
+                  className={`px-5 py-2 rounded-lg flex items-center gap-2 transition-all duration-200 font-medium text-sm ${appMode === 'compare' ? 'bg-white dark:bg-slate-700/80 text-slate-900 dark:text-white shadow-sm' : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-300'}`}
+                >
+                  <Layers className="w-3.5 h-3.5" /> Compare
+                </button>
+              </Tooltip>
+            </div>
+          </div>
+
+          <form onSubmit={appMode === 'compare' ? handleCompare : (e) => handleAnalyze(e)} className="relative w-full max-w-2xl mx-auto mb-10 group z-10">
             <div className="absolute -inset-0.5 bg-gradient-to-r from-indigo-500 to-blue-500 rounded-2xl blur opacity-30 group-hover:opacity-50 transition duration-500"></div>
             
-            <div className="relative flex items-center glass-panel rounded-2xl transition-all duration-300 overflow-hidden h-16">
-              
-              <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-400 transition-colors group-focus-within:text-indigo-500">
-                <GithubIcon className="w-5 h-5" />
+            <div className="flex flex-col gap-3">
+              {/* Repo A input */}
+              <div className="relative flex items-center glass-panel rounded-2xl transition-all duration-300 overflow-hidden h-16">
+                <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-400 transition-colors group-focus-within:text-indigo-500">
+                  <GithubIcon className="w-5 h-5" />
+                </div>
+
+                <input
+                  type="text"
+                  placeholder={appMode === 'compare' ? 'Repo A — https://github.com/owner/repo' : 'https://github.com/owner/repository'}
+                  className="flex-1 bg-transparent border-none outline-none focus:ring-0 px-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm h-full w-full min-w-0"
+                  value={url}
+                  onChange={(e) => setUrl(e.target.value)}
+                  disabled={state.status === 'fetching' || state.status === 'analyzing' || isComparing}
+                  spellCheck={false}
+                />
+
+                {appMode === 'analyze' && (
+                  <div className="pr-2">
+                    <button
+                      type="submit"
+                      disabled={state.status === 'fetching' || state.status === 'analyzing'}
+                      className="h-11 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 whitespace-nowrap flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 border border-indigo-400/20"
+                    >
+                      {state.status === 'fetching' ? (
+                        <Activity className="animate-spin w-4 h-4" />
+                      ) : state.status === 'analyzing' ? (
+                        <div className="flex items-center gap-2">
+                          <span className="relative flex h-3 w-3">
+                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                            <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
+                          </span>
+                        </div>
+                      ) : (
+                        <SearchIcon className="w-4 h-4" />
+                      )}
+                      <span>{state.status === 'fetching' || state.status === 'analyzing' ? 'Processing' : 'Analyze'}</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <input
-                type="text"
-                placeholder="https://github.com/owner/repository"
-                className="flex-1 bg-transparent border-none outline-none focus:ring-0 px-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm h-full w-full min-w-0"
-                value={url}
-                onChange={(e) => setUrl(e.target.value)}
-                disabled={state.status === 'fetching' || state.status === 'analyzing'}
-                spellCheck={false}
-              />
+              {/* Repo B input — compare mode only */}
+              {appMode === 'compare' && (
+                <>
+                  <div className="flex items-center justify-center text-xs font-mono text-slate-400 dark:text-slate-500 uppercase tracking-widest select-none">
+                    vs
+                  </div>
 
-              <div className="pr-2">
-                <button
-                  type="submit"
-                  disabled={state.status === 'fetching' || state.status === 'analyzing'}
-                  className="h-11 px-6 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 whitespace-nowrap flex items-center gap-2 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 border border-indigo-400/20"
-                >
-                  {state.status === 'fetching' ? (
-                    <Activity className="animate-spin w-4 h-4" />
-                  ) : state.status === 'analyzing' ? (
-                     <div className="flex items-center gap-2">
+                  <div className="relative flex items-center glass-panel rounded-2xl transition-all duration-300 overflow-hidden h-16">
+                    <div className="pl-5 pr-3 flex items-center justify-center text-slate-400 dark:text-slate-400">
+                      <GithubIcon className="w-5 h-5" />
+                    </div>
+
+                    <input
+                      type="text"
+                      placeholder="Repo B — https://github.com/owner/repo"
+                      className="flex-1 bg-transparent border-none outline-none focus:ring-0 px-2 text-slate-800 dark:text-slate-100 placeholder-slate-400 dark:placeholder-slate-500 font-mono text-sm h-full w-full min-w-0"
+                      value={urlB}
+                      onChange={(e) => setUrlB(e.target.value)}
+                      disabled={isComparing}
+                      spellCheck={false}
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isComparing}
+                    className="w-full h-12 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl font-medium transition-all duration-200 shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100 border border-indigo-400/20 mt-1"
+                  >
+                    {isComparing ? (
+                      <>
                         <span className="relative flex h-3 w-3">
                           <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
                           <span className="relative inline-flex rounded-full h-3 w-3 bg-white"></span>
                         </span>
-                     </div>
-                  ) : (
-                    <SearchIcon className="w-4 h-4" />
-                  )}
-                  <span>{state.status === 'fetching' || state.status === 'analyzing' ? 'Processing' : 'Analyze'}</span>
-                </button>
-              </div>
+                        <span>Comparing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Layers className="w-4 h-4" />
+                        <span>Compare Repositories</span>
+                      </>
+                    )}
+                  </button>
+                </>
+              )}
             </div>
           </form>
 
@@ -449,7 +599,7 @@ const App: React.FC = () => {
 
           </div>
 
-          {state.status === 'error' && (
+          {state.status === 'error' && appMode === 'analyze' && (
             <div className="mt-8 p-4 glass-panel border-red-500/30 bg-red-50/50 dark:bg-red-900/20 rounded-lg text-red-600 dark:text-red-200 text-sm flex items-center justify-center gap-2 animate-pulse">
               <AlertTriangle className="w-4 h-4" />
               {state.message}
@@ -457,8 +607,18 @@ const App: React.FC = () => {
           )}
         </div>
 
+        {/* COMPARE VIEW */}
+        {showCompare && (
+          <CompareView
+            repo1Name={compareRepo1Name}
+            repo2Name={compareRepo2Name}
+            state1={state}
+            state2={stateB}
+          />
+        )}
+
         {/* LOADING STEPS INDICATOR */}
-        {showLoading && (
+        {!showCompare && showLoading && (
            <div className="max-w-2xl mx-auto mt-16">
               <div className="glass-panel rounded-xl p-6 relative overflow-hidden">
                 <h3 className="text-center font-mono font-bold text-slate-800 dark:text-white mb-6 tracking-wide relative z-10">SYSTEM ANALYSIS IN PROGRESS</h3>
@@ -511,8 +671,8 @@ const App: React.FC = () => {
            </div>
         )}
 
-        {/* Results */}
-        {showResults && state.data && (
+        {/* Results — single repo mode */}
+        {!showCompare && showResults && state.data && (
           <div className="animate-fade-in-up transition-all duration-500">
             
             {/* Status Bar for Streaming */}
