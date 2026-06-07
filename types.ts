@@ -1,5 +1,7 @@
 export type AnalysisMode = 'full' | 'architecture' | 'risks';
 
+export type AppMode = 'analyze' | 'compare';
+
 export interface RepoAnalysis {
   projectOverview: SectionContent;
   architectureSummary: SectionContent;
